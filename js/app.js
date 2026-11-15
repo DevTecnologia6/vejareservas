@@ -368,7 +368,8 @@ function abrirFormReserva(r = {}) {
       <label class="campo">Endereço do cliente<input name="clienteEndereco" placeholder="Rua, nº, bairro, cidade" value="${esc(v.clienteEndereco)}"></label>
       <label class="campo">Tipo de evento<input name="evento" list="eventos" placeholder="Aniversário, churrasco…" value="${esc(v.evento)}">
         <datalist id="eventos"><option>Aniversário</option><option>Confraternização</option><option>Chá de bebê</option><option>Churrasco</option><option>Casamento</option><option>Day use</option></datalist></label>
-      <label class="campo">Data${v.status === 'congelada' ? ' (opcional se congelada)' : ''}<input type="date" name="data" value="${esc(v.data)}"></label>
+      <label class="campo">Data de entrada (1º dia)${v.status === 'congelada' ? ' — opcional se congelada' : ''}<input type="date" name="data" value="${esc(v.data)}"></label>
+      <label class="campo">Último dia (para várias datas)<input type="date" name="dataFim" value="${esc(v.data ? addDias(v.data, (+v.dias || 1) - 1) : '')}"><span class="horario-info">Deixe igual à entrada para 1 dia</span></label>
       <label class="campo">Período
         <select name="periodo"><option value="24h" ${v.periodo === '24h' ? 'selected' : ''}>24 horas (diária)</option><option value="12h" ${v.periodo === '12h' ? 'selected' : ''}>12 horas</option></select></label>
       <label class="campo">Quantidade de diárias<input type="number" name="dias" min="1" max="30" value="${+v.dias || 1}"><span class="horario-info" id="dias-info"></span></label>
@@ -399,7 +400,15 @@ function abrirFormReserva(r = {}) {
       $('#dias-info', m).textContent = +f.dias.value > 1 ? `${f.dias.value} × ${fmt(cfg.preco24)}` : '';
       atualizarTotal(); atualizarSaida();
     };
-    f.periodo.onchange = recalcular; f.dias.oninput = recalcular;
+    f.periodo.onchange = recalcular;
+    const diff = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${a}T12:00:00`)) / 864e5);
+    f.dias.oninput = () => { if (f.data.value) f.dataFim.value = addDias(f.data.value, Math.max(1, +f.dias.value || 1) - 1); recalcular(); };
+    f.dataFim.oninput = () => {
+      if (!f.data.value || !f.dataFim.value) return;
+      if (f.dataFim.value < f.data.value) f.dataFim.value = f.data.value;
+      f.dias.value = Math.min(30, diff(f.data.value, f.dataFim.value) + 1); recalcular();
+    };
+    f.data.addEventListener('input', () => { if (f.data.value) f.dataFim.value = addDias(f.data.value, Math.max(1, +f.dias.value || 1) - 1); recalcular(); });
     f.periodo.disabled = +f.dias.value > 1;
     f.valor.oninput = f.taxaLimpeza.oninput = atualizarTotal;
     const atualizarSaida = () => {
