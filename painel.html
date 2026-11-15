@@ -29,12 +29,22 @@
         </label>
         <div class="erro" id="link-erro"></div>
         <button class="btn btn-ouro btn-bloco" type="submit">Continuar</button>
+        <button type="button" class="btn-link" id="ja-tenho-link" style="justify-self:center">Já recebi o link no e-mail</button>
         <p style="font-size:12.5px;color:var(--cinza);text-align:center;line-height:1.45">🔐 Aparelho novo: enviaremos um <b>link de autorização</b> para o seu e-mail. Depois disso, é só a senha.</p>
       </form>
       <div id="link-enviado" class="oculto" style="text-align:center">
         <div style="font-size:46px">📧</div>
         <p style="margin:6px 0 4px"><b>Autorize este aparelho</b></p>
         <p style="color:var(--cinza);font-size:14px;line-height:1.5">Enviamos um link para <b id="link-para"></b>. Abra o e-mail <u>neste mesmo aparelho</u> e toque no link. Não achou? Olhe no spam.</p>
+        <div style="text-align:left;margin-top:14px;padding:12px;border-radius:12px;background:var(--creme,#f8f4ec)">
+          <p style="font-size:13px;line-height:1.45;margin:0 0 8px"><b>📱 Abriu pelo atalho da tela inicial?</b> No e-mail, <b>segure o dedo no link → Copiar link</b> (não abra). Volte aqui e cole:</p>
+          <label class="campo" style="margin:0"><input type="text" id="link-colar" placeholder="Cole o link do e-mail aqui" autocomplete="off"></label>
+          <div class="erro" id="link-colar-erro"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button type="button" class="btn btn-claro btn-peq" id="link-colar-btn">📋 Colar</button>
+            <button type="button" class="btn btn-ouro btn-peq" id="link-colar-ok" style="flex:1">Autorizar este aparelho</button>
+          </div>
+        </div>
         <button type="button" class="btn-link" id="link-voltar" style="margin-top:10px">Voltar</button>
       </div>
       <form id="form-confirmar-link" class="oculto">

@@ -67,9 +67,17 @@ export async function ehLinkDeAcesso() {
   return au.isSignInWithEmailLink(fauth, location.href);
 }
 export const emailDoLink = () => localStorage.getItem(CHAVE_LINK) || '';
-export async function concluirLinkAcesso(email) {
+// aceita o link colado (ex.: atalho na tela inicial, que não compartilha o login com o navegador)
+export function linkColado(txt) {
+  let t = String(txt || '').trim();
+  for (let i = 0; i < 4 && !/oobCode=/.test(t) && /oobCode%3D/i.test(t); i++) { try { t = decodeURIComponent(t); } catch { break; } }
+  const code = (t.match(/oobCode=([^&#\s]+)/) || [])[1], key = (t.match(/apiKey=([^&#\s]+)/) || [])[1];
+  if (!code || !/mode=signIn/.test(t)) return '';
+  return `${location.origin}${location.pathname}?apiKey=${key || firebaseConfig.apiKey}&oobCode=${code}&mode=signIn&lang=pt-BR`;
+}
+export async function concluirLinkAcesso(email, link = location.href) {
   await initFirebase();
-  await au.signInWithEmailLink(fauth, email, location.href);
+  await au.signInWithEmailLink(fauth, email, link);
   localStorage.removeItem(CHAVE_LINK);
   history.replaceState(null, '', location.pathname);
 }

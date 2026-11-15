@@ -1042,6 +1042,30 @@ async function iniciar() {
   // ----- 1ª etapa: autorizar o aparelho pelo link no e-mail
   const mostrarForm = (id) => ['#form-link', '#link-enviado', '#form-confirmar-link', '#form-senha'].forEach((f) => $(f).classList.toggle('oculto', f !== id));
   $('#link-voltar').onclick = () => mostrarForm('#form-link');
+  $('#ja-tenho-link').onclick = () => {
+    const email = $('#link-email').value.trim() || db.emailDoLink();
+    if (!email) return ($('#link-erro').textContent = 'Digite o seu e-mail primeiro.');
+    localStorage.setItem('vejareservas_email_link', email);
+    $('#link-para').textContent = email; mostrarForm('#link-enviado');
+  };
+  $('#link-colar-btn').onclick = async () => {
+    try { $('#link-colar').value = await navigator.clipboard.readText(); }
+    catch { $('#link-colar').focus(); $('#link-colar-erro').textContent = 'Toque e segure no campo acima e escolha "Colar".'; }
+  };
+  $('#link-colar-ok').onclick = async () => {
+    const erro = $('#link-colar-erro'), btn = $('#link-colar-ok');
+    erro.textContent = '';
+    const link = db.linkColado($('#link-colar').value);
+    if (!link) return (erro.textContent = 'Isso não parece o link de acesso. Copie o link do e-mail mais recente.');
+    const email = $('#link-para').textContent.trim() || db.emailDoLink();
+    btn.disabled = true; btn.textContent = 'Autorizando…';
+    try { await db.concluirLinkAcesso(email, link); }
+    catch (err) {
+      console.error(err);
+      erro.textContent = /invalid-action-code|expired/.test(err.code) ? 'Este link expirou ou já foi aberto. Toque em Voltar e peça um novo (não abra, só copie).' : /invalid-email/.test(err.code) ? 'O e-mail não confere com o do link.' : 'Não foi possível autorizar: ' + (err.code || err.message);
+    }
+    btn.disabled = false; btn.textContent = 'Autorizar este aparelho';
+  };
   $('#form-link').onsubmit = async (e) => {
     e.preventDefault();
     const email = $('#link-email').value.trim(), btn = $('#form-link button[type=submit]');
