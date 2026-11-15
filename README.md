@@ -109,6 +109,15 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - **CSP:** o navegador só executa scripts do próprio site e do Firebase.
 - **Checklist do sistema:** em *Ajustes* (e aviso no *Início*) mostra o que falta configurar.
 
+## 5.0.5 Acesso do administrador em duas etapas
+
+1. **Aparelho novo:** digite o e-mail no painel → chega um **link de autorização** → abra-o no mesmo aparelho.
+2. **Senha do painel:** no primeiro acesso, toque em *"Primeiro acesso? Criar a senha do painel"* (mínimo 8 caracteres).
+3. Depois disso, no aparelho autorizado basta a senha. **Sair** apenas tranca o painel; **Desconectar este aparelho** exige link + senha de novo.
+4. A senha é conferida pelas regras do Firestore (hash SHA-256 em `segredoAdmin`) — não dá para pular pelo console (F12).
+5. Pré-requisito: Firebase → Authentication → Método de login → E-mail/senha → ativar **Link do e-mail (login sem senha)**.
+6. Esqueceu a senha do painel? No console do Firebase → Firestore, apague o documento `segredoAdmin/<seu uid>` e crie a senha de novo pelo link.
+
 ## 5.0.3 Prazo de 30 minutos para pagar
 
 - Ao enviar a pré-reserva o cliente vê o QR Code do Pix e uma **contagem regressiva de 30 minutos** (ajustável em *Ajustes → Tempo para o cliente pagar*).

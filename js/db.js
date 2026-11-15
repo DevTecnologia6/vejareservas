@@ -73,12 +73,44 @@ export async function concluirLinkAcesso(email) {
   localStorage.removeItem(CHAVE_LINK);
   history.replaceState(null, '', location.pathname);
 }
-// troca a senha por uma aleatória que ninguém conhece: a partir daí só se entra pelo link do e-mail
-export async function desligarLoginPorSenha() {
+// ---------------------------------------------------------------- 2ª etapa: senha do painel (conferida pelo servidor)
+const sha256 = async (txt) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+async function sessaoAtual() {
+  const r = await fauth.currentUser.getIdTokenResult(true);
+  const at = parseInt(r.claims.auth_time, 10);
+  return { uid: fauth.currentUser.uid, at, id: `${fauth.currentUser.uid}_${at}` };
+}
+// libera ESTE aparelho/sessão com a senha do painel
+export async function desbloquearPainel(senha) {
   if (modoDemo) return;
+  await initFirebase();
+  const s = await sessaoAtual();
+  const h = await sha256(`${s.uid}:${senha}`);
+  await fs.setDoc(fs.doc(fdb, 'acessoAdmin', s.id), { authTime: s.at, h, em: new Date().toISOString() });
+}
+// primeiro acesso: cria a senha do painel e troca a senha de login do Firebase por uma aleatória (só se entra pelo link do e-mail)
+export async function criarSenhaPainel(senha) {
+  if (modoDemo) return;
+  await initFirebase();
   const bytes = crypto.getRandomValues(new Uint8Array(32));
-  const aleatoria = btoa(String.fromCharCode(...bytes)) + 'Aa1!';
-  await au.updatePassword(fauth.currentUser, aleatoria);
+  await au.updatePassword(fauth.currentUser, btoa(String.fromCharCode(...bytes)) + 'Aa1!');
+  const s = await sessaoAtual();
+  const h = await sha256(`${s.uid}:${senha}`);
+  await fs.setDoc(fs.doc(fdb, 'segredoAdmin', s.uid), { hash: await sha256(h) });
+  await desbloquearPainel(senha);
+}
+export async function trocarSenhaPainel(nova) {
+  if (modoDemo) return;
+  const s = await sessaoAtual();
+  const h = await sha256(`${s.uid}:${nova}`);
+  await fs.setDoc(fs.doc(fdb, 'segredoAdmin', s.uid), { hash: await sha256(h) });
+  await desbloquearPainel(nova);
+}
+// "Sair": tranca o painel neste aparelho (continua autorizado; volta pedindo só a senha)
+export async function trancarPainel() {
+  if (modoDemo) return logout();
+  const s = await sessaoAtual();
+  await fs.deleteDoc(fs.doc(fdb, 'acessoAdmin', s.id)).catch(() => {});
 }
 
 export async function recuperarSenha(email) {

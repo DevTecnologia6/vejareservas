@@ -916,8 +916,15 @@ function renderConfig(el) {
         </div>
         <div class="card">
           <div class="card-topo"><h3>🔐 Segurança do acesso</h3></div>
-          <p style="color:var(--cinza);font-size:14px;line-height:1.5">Hoje dá para entrar no painel com a <b>senha</b> ou com o <b>link no e-mail</b>. Desligando o login por senha, um aparelho novo só entra pelo link enviado para <b>${esc(state.usuarioEmail || '')}</b>. Os aparelhos onde você já está conectado continuam funcionando.</p>
-          <div class="modal-acoes" style="justify-content:flex-start"><button type="button" class="btn btn-perigo btn-peq" id="travar-senha">Desligar login por senha</button></div>
+          <p style="color:var(--cinza);font-size:14px;line-height:1.5">O painel exige <b>duas etapas</b>: cada aparelho novo precisa ser autorizado pelo <b>link enviado ao seu e-mail</b> e depois a <b>senha do painel</b>. O botão <b>Sair</b> só tranca o painel neste aparelho (para voltar, basta a senha).</p>
+          <div class="grade-form" style="margin-top:12px">
+            <label class="campo">Nova senha do painel<input type="password" id="nova-senha" minlength="8" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>
+            <label class="campo">Repita a nova senha<input type="password" id="nova-senha2" minlength="8" autocomplete="new-password"></label>
+          </div>
+          <div class="modal-acoes" style="justify-content:flex-start">
+            <button type="button" class="btn btn-claro btn-peq" id="trocar-senha">Trocar senha do painel</button>
+            <button type="button" class="btn btn-perigo btn-peq" id="desconectar-aparelho">Desconectar este aparelho</button>
+          </div>
         </div>
         <div class="card">
           <div class="card-topo"><h3>📄 Contrato</h3><button type="button" class="btn btn-claro btn-peq" id="ver-modelo">Ver modelo</button></div>
@@ -954,10 +961,16 @@ function renderConfig(el) {
     </div>
     <div class="modal-acoes" style="position:sticky;bottom:12px"><button class="btn btn-ouro" style="padding:14px 28px">Salvar configurações</button></div>
     </form>`;
-  $('#travar-senha').onclick = async (e) => {
-    if (!confirm('Desligar o login por senha? A partir de agora, para entrar em um aparelho novo você vai receber um link no e-mail. Este aparelho continua conectado.')) return;
-    try { await db.desligarLoginPorSenha(); toast('Pronto! Novos aparelhos só entram pelo link no e-mail.'); e.target.disabled = true; e.target.textContent = 'Login por senha desligado ✓'; }
-    catch (err) { console.error(err); toast(/requires-recent-login/.test(err.code) ? 'Por segurança, saia e entre de novo pelo link do e-mail e repita.' : 'Não foi possível: ' + (err.code || err.message)); }
+  $('#trocar-senha').onclick = async () => {
+    const a = $('#nova-senha').value, b2 = $('#nova-senha2').value;
+    if (a.length < 8) return toast('A senha precisa ter pelo menos 8 caracteres.');
+    if (a !== b2) return toast('As senhas não conferem.');
+    try { await db.trocarSenhaPainel(a); $('#nova-senha').value = $('#nova-senha2').value = ''; toast('Senha do painel alterada!'); }
+    catch (err) { console.error(err); toast('Não foi possível trocar a senha: ' + (err.code || err.message)); }
+  };
+  $('#desconectar-aparelho').onclick = async () => {
+    if (!confirm('Desconectar este aparelho? Para entrar de novo nele, será preciso autorizar pelo link do e-mail e digitar a senha.')) return;
+    await db.trancarPainel(); await db.logout(); location.reload();
   };
   $('#copiar').onclick = async () => { try { await navigator.clipboard.writeText(linkPublico); toast('Link copiado!'); } catch { toast('Copie o link manualmente.'); } };
   $('#backup').onclick = () => {
@@ -1024,12 +1037,10 @@ async function iniciar() {
 
   document.addEventListener('click', (e) => { if (e.target.closest('[data-acao="nova-reserva"]')) abrirFormReserva(); });
   window.addEventListener('hashchange', rota);
-  $('#btn-sair').onclick = () => db.logout();
+  $('#btn-sair').onclick = async () => { await db.trancarPainel(); location.reload(); };
 
-  // ----- acesso por link no e-mail
-  const mostrarForm = (id) => ['#form-link', '#form-login', '#link-enviado', '#form-confirmar-link'].forEach((f) => $(f).classList.toggle('oculto', f !== id));
-  $('#usar-senha').onclick = () => mostrarForm('#form-login');
-  $('#usar-link').onclick = () => mostrarForm('#form-link');
+  // ----- 1ª etapa: autorizar o aparelho pelo link no e-mail
+  const mostrarForm = (id) => ['#form-link', '#link-enviado', '#form-confirmar-link', '#form-senha'].forEach((f) => $(f).classList.toggle('oculto', f !== id));
   $('#link-voltar').onclick = () => mostrarForm('#form-link');
   $('#form-link').onsubmit = async (e) => {
     e.preventDefault();
@@ -1041,32 +1052,49 @@ async function iniciar() {
       $('#link-para').textContent = email; mostrarForm('#link-enviado');
     } catch (err) {
       console.error(err);
-      $('#link-erro').textContent = /operation-not-allowed/.test(err.code) ? 'O login por link ainda não foi ativado no Firebase (veja as instruções).' : /too-many/.test(err.code) ? 'Muitas tentativas. Aguarde alguns minutos.' : 'Não foi possível enviar: ' + (err.code || err.message);
+      $('#link-erro').textContent = /operation-not-allowed/.test(err.code) ? 'O login por link ainda não foi ativado no Firebase.' : /too-many/.test(err.code) ? 'Muitas tentativas. Aguarde alguns minutos.' : 'Não foi possível enviar: ' + (err.code || err.message);
     }
-    btn.disabled = false; btn.textContent = '📧 Receber link de acesso';
+    btn.disabled = false; btn.textContent = 'Continuar';
   };
   const concluir = async (email, erroEl) => {
     try { await db.concluirLinkAcesso(email); }
-    catch (err) { console.error(err); erroEl.textContent = /invalid-action-code|expired/.test(err.code) ? 'Este link expirou ou já foi usado. Peça um novo.' : /invalid-email/.test(err.code) ? 'O e-mail não confere com o do link.' : 'Não foi possível entrar: ' + (err.code || err.message); mostrarForm(erroEl.id === 'conf-link-erro' ? '#form-confirmar-link' : '#form-link'); }
+    catch (err) { console.error(err); erroEl.textContent = /invalid-action-code|expired/.test(err.code) ? 'Este link expirou ou já foi usado. Peça um novo.' : /invalid-email/.test(err.code) ? 'O e-mail não confere com o do link.' : 'Não foi possível autorizar: ' + (err.code || err.message); mostrarForm(erroEl.id === 'conf-link-erro' ? '#form-confirmar-link' : '#form-link'); $('#tela-login').classList.remove('oculto'); }
   };
   if (await db.ehLinkDeAcesso()) {
     const email = db.emailDoLink();
+    $('#form-confirmar-link').onsubmit = (e) => { e.preventDefault(); concluir($('#conf-link-email').value.trim(), $('#conf-link-erro')); };
     if (email) await concluir(email, $('#link-erro'));
     else { mostrarForm('#form-confirmar-link'); $('#tela-login').classList.remove('oculto'); }
-    $('#form-confirmar-link').onsubmit = (e) => { e.preventDefault(); concluir($('#conf-link-email').value.trim(), $('#conf-link-erro')); };
   }
 
-  $('#esqueci-admin').onclick = async () => {
-    const email = $('#login-email').value.trim();
-    if (!email) return ($('#login-erro').textContent = 'Digite seu e-mail acima primeiro.');
-    try { await db.recuperarSenha(email); $('#login-erro').innerHTML = '<span style="color:var(--verde)">Link de redefinição enviado para o seu e-mail.</span>'; }
-    catch (err) { $('#login-erro').textContent = 'Não foi possível enviar: ' + (err.code || err.message); }
+  // ----- 2ª etapa: senha do painel
+  let criando = false;
+  $('#primeiro-acesso').onclick = () => {
+    criando = !criando;
+    $('#campo-senha2').classList.toggle('oculto', !criando);
+    $('#senha-btn').textContent = criando ? 'Criar senha e entrar' : 'Entrar';
+    $('#primeiro-acesso').textContent = criando ? 'Já tenho a senha do painel' : 'Primeiro acesso? Criar a senha do painel';
+    $('#senha-painel').autocomplete = criando ? 'new-password' : 'current-password';
   };
-  $('#form-login').onsubmit = async (e) => {
+  $('#desconectar').onclick = () => db.logout();
+  $('#form-senha').onsubmit = async (e) => {
     e.preventDefault();
-    $('#login-erro').textContent = '';
-    try { await db.login($('#login-email').value.trim(), $('#login-senha').value); }
-    catch (err) { $('#login-erro').textContent = /invalid|wrong|user-not-found|credential/i.test(err.code || err.message) ? 'E-mail ou senha incorretos.' : 'Erro ao entrar: ' + (err.code || err.message); }
+    const senha = $('#senha-painel').value, erro = $('#senha-erro'), btn = $('#senha-btn');
+    erro.textContent = '';
+    if (criando) {
+      if (senha.length < 8) return (erro.textContent = 'Use pelo menos 8 caracteres.');
+      if (senha !== $('#senha-painel2').value) return (erro.textContent = 'As senhas não conferem.');
+    }
+    btn.disabled = true; btn.textContent = 'Verificando…';
+    try {
+      if (criando) await db.criarSenhaPainel(senha); else await db.desbloquearPainel(senha);
+      location.reload();
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false; btn.textContent = criando ? 'Criar senha e entrar' : 'Entrar';
+      erro.textContent = /requires-recent-login/.test(err.code) ? 'Por segurança, desconecte e autorize o aparelho de novo pelo link.'
+        : criando ? 'Não foi possível criar: a senha do painel já existe. Use "Já tenho a senha".' : 'Senha incorreta.';
+    }
   };
 
   await db.onAuth(async (user) => {
@@ -1074,13 +1102,19 @@ async function iniciar() {
     $('#tela-login').classList.add('oculto');
     $('#usuario-email').textContent = user.email;
     state.usuarioEmail = user.email;
-    // o administrador precisa ter o e-mail confirmado (proteção extra do painel)
-    if (!user.emailVerified) { $('#tela-app').classList.remove('oculto'); return mostrarVerificacaoDono(user); }
+    // aparelho não autorizado pelo link do e-mail (ex.: entrou só com senha antiga): pede autorização
+    if (!user.emailVerified) { await db.logout(); return; }
     try { await carregar(); }
     catch (err) {
       console.error(err);
-      $('#tela-app').classList.remove('oculto');
       const negado = /permission|insufficient/i.test(err.code || err.message);
+      // aparelho autorizado, mas painel trancado: pede a senha do painel
+      if (negado && !db.modoDemo) {
+        $('#tela-app').classList.add('oculto'); $('#tela-login').classList.remove('oculto');
+        $('#senha-email').textContent = user.email; mostrarForm('#form-senha'); $('#senha-painel').focus();
+        return;
+      }
+      $('#tela-app').classList.remove('oculto');
       $('#conteudo').innerHTML = negado
         ? `<div class="card"><h3>🔒 Acesso restrito</h3><p style="margin-top:8px;color:var(--cinza)">A conta <b>${esc(user.email)}</b> não tem permissão para acessar o painel do proprietário.<br><br>Se você é cliente, use o <a href="./">site de reservas</a>. Se você é o dono, confira se este e-mail está nas regras do Firestore (veja o README).</p><button class="btn btn-claro" style="margin-top:14px" id="sair-restrito">Sair desta conta</button></div>`
         : `<div class="card"><h3>Não foi possível carregar os dados</h3><p style="margin-top:8px;color:var(--cinza)">${esc(err.message)}</p><button class="btn btn-claro" style="margin-top:14px" id="sair-restrito">Sair</button></div>`;

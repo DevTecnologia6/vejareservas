@@ -5,10 +5,16 @@ service cloud.firestore {
     // ================= Funções =================
 
     // PROPRIETÁRIO: e-mail na lista E e-mail confirmado
-    function isDono() {
+    // 1ª etapa: e-mail do dono confirmado (aparelho autorizado pelo link do e-mail)
+    function emailDono() {
       return request.auth != null
         && request.auth.token.email in ['devtecnologia6@gmail.com']
         && request.auth.token.email_verified == true;
+    }
+    function idSessao() { return request.auth.uid + '_' + string(request.auth.token.auth_time); }
+    // 2ª etapa: senha do painel conferida nesta sessão
+    function isDono() {
+      return emailDono() && exists(/databases/$(database)/documents/acessoAdmin/$(idSessao()));
     }
     function logado()          { return request.auth != null; }
     function emailConfirmado() { return logado() && request.auth.token.email_verified == true; }
@@ -28,6 +34,29 @@ service cloud.firestore {
     // a data está dentro das diárias da pré-reserva?
     function dentroDaSol(dia, s) {
       return diaTs(dia) >= diaTs(s.data) && diaTs(dia) < diaTs(s.data) + duration.value(s.get('dias', 1), 'd');
+    }
+
+    // ================= Acesso em duas etapas do administrador =================
+    // hash da senha do painel: ninguém lê; criado uma vez; trocado só com o painel destrancado
+    match /segredoAdmin/{uid} {
+      allow read, delete: if false;
+      allow create: if emailDono() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['hash'])
+        && request.resource.data.hash is string && request.resource.data.hash.size() == 64;
+      allow update: if isDono() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['hash'])
+        && request.resource.data.hash is string && request.resource.data.hash.size() == 64;
+    }
+    // destrava a sessão atual somente se a senha conferir com o hash guardado
+    match /acessoAdmin/{sid} {
+      allow read: if false;
+      allow create, update: if emailDono() && sid == idSessao()
+        && request.resource.data.keys().hasOnly(['authTime', 'h', 'em'])
+        && request.resource.data.authTime == request.auth.token.auth_time
+        && request.resource.data.h is string && request.resource.data.h.size() == 64
+        && hashing.sha256(request.resource.data.h.toUtf8()).toHexString().lower()
+           == get(/databases/$(database)/documents/segredoAdmin/$(request.auth.uid)).data.hash;
+      allow delete: if emailDono() && sid == idSessao();
     }
 
     // ================= Área do proprietário =================
