@@ -6,7 +6,7 @@ on:
   workflow_dispatch:         # botão "Run workflow" para testar na hora
     inputs:
       data_teste:
-        description: 'Testar com uma data específica (AAAA-MM-DD) — deixe vazio para amanhã'
+        description: 'Testar com uma data específica (ex.: 16/11/2026) — deixe vazio para amanhã'
         required: false
 
 jobs:

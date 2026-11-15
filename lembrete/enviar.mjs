@@ -23,7 +23,9 @@ const br = (iso) => iso.split('-').reverse().join('/');
 const fone = (s) => { const d = String(s || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d || 'não informado'; };
 
 // "amanhã" no fuso de Brasília
-const amanha = DATA_TESTE || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + 86400000));
+// aceita a data de teste como AAAA-MM-DD ou DD/MM/AAAA
+const dataTeste = (DATA_TESTE || '').trim().replace(/^(\d{2})\/(\d{2})\/(\d{4})$/, '$3-$2-$1');
+const amanha = dataTeste || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + 86400000));
 
 async function enviarWhatsApp(texto) {
   const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(CALLMEBOT_PHONE)}&text=${encodeURIComponent(texto)}&apikey=${encodeURIComponent(CALLMEBOT_APIKEY)}`;
