@@ -5,6 +5,7 @@ import * as db from './db.js';
 import { renderCalendario, MESES } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { abrirVisualizador } from './fotos.js';
+import { htmlContrato, abrirContrato, cpfFmt, cpfValido, CLAUSULAS_PADRAO } from './contrato.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const br = (iso) => iso.split('-').reverse().join('/');
@@ -90,7 +91,7 @@ function selecionar(iso, estado) {
   if (info.whatsapp) botoes.push(`<a class="btn ${info.preReserva ? 'btn-claro' : 'btn-verde'}" target="_blank" rel="noopener" href="${linkZap(`Olá! Vi no calendário que o ${info.nome} está livre no dia ${br(iso)} (${diaExtenso(iso).toLowerCase()}). Gostaria de mais informações para reservar!`)}">${ZAP} Conversar no WhatsApp</a>`);
   sel.innerHTML = `<b>${diaExtenso(iso)} está livre!</b>
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">${botoes.join('') || '<span style="color:var(--cinza)">Entre em contato para reservar.</span>'}</div>`;
-  $('#btn-reservar')?.addEventListener('click', () => abrirPreReserva(iso));
+  $('#btn-reservar')?.addEventListener('click', () => (perfil?.cpf && perfil?.endereco ? abrirPreReserva(iso) : abrirDadosContrato(() => abrirPreReserva(iso))));
 }
 
 // ---------------------------------------------------------------- modal
@@ -152,7 +153,9 @@ function abrirConta(aba = 'cadastro', depois) {
     </div>
     <form id="form-conta" class="grade-form">
       ${cad ? `<label class="campo inteiro">Nome completo<input name="nome" required minlength="3" maxlength="80" autocomplete="name"></label>
-      <label class="campo inteiro">WhatsApp (com DDD)<input name="telefone" required inputmode="tel" placeholder="(27) 99999-9999" autocomplete="tel"></label>` : ''}
+      <label class="campo inteiro">WhatsApp (com DDD)<input name="telefone" required inputmode="tel" placeholder="(27) 99999-9999" autocomplete="tel"></label>
+      <label class="campo">CPF<input name="cpf" required inputmode="numeric" placeholder="000.000.000-00" maxlength="14"></label>
+      <label class="campo">Endereço completo<input name="endereco" required minlength="8" maxlength="150" placeholder="Rua, nº, bairro, cidade/UF"></label>` : ''}
       <label class="campo inteiro">E-mail<input type="email" name="email" required autocomplete="email"></label>
       <label class="campo ${cad ? '' : 'inteiro'}">Senha<input type="password" name="senha" required minlength="6" autocomplete="${cad ? 'new-password' : 'current-password'}"></label>
       ${cad ? `<label class="campo">Confirmar senha<input type="password" name="senha2" required minlength="6" autocomplete="new-password"></label>` : ''}
@@ -175,13 +178,14 @@ function abrirConta(aba = 'cadastro', depois) {
       if (cad) {
         const tel = d.telefone.replace(/\D/g, '');
         if (tel.length < 10 || tel.length > 11) return (erro.textContent = 'Informe um WhatsApp válido com DDD.');
+        if (!cpfValido(d.cpf)) return (erro.textContent = 'CPF inválido. Confira os números.');
         if (d.senha !== d.senha2) return (erro.textContent = 'As senhas não conferem.');
       }
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Aguarde…';
       try {
         if (cad) {
           usuario = await db.clienteCadastrar(d.email.trim(), d.senha);
-          const dadosPerfil = { nome: d.nome.trim(), telefone: d.telefone.replace(/\D/g, ''), email: d.email.trim(), criadoEm: new Date().toISOString() };
+          const dadosPerfil = { nome: d.nome.trim(), telefone: d.telefone.replace(/\D/g, ''), cpf: d.cpf.replace(/\D/g, ''), endereco: d.endereco.trim(), email: d.email.trim(), criadoEm: new Date().toISOString() };
           perfil = { ...dadosPerfil, _uid: usuario.uid };
           await db.set('clientes', usuario.uid, dadosPerfil);
         } else {
@@ -234,15 +238,41 @@ function abrirCompletarPerfil(depois) {
     <form id="form-perfil" class="grade-form">
       <label class="campo inteiro">Nome completo<input name="nome" required minlength="3" maxlength="80"></label>
       <label class="campo inteiro">WhatsApp (com DDD)<input name="telefone" required inputmode="tel" placeholder="(27) 99999-9999"></label>
+      <label class="campo">CPF<input name="cpf" required inputmode="numeric" placeholder="000.000.000-00" maxlength="14"></label>
+      <label class="campo">Endereço completo<input name="endereco" required minlength="8" maxlength="150" placeholder="Rua, nº, bairro, cidade/UF"></label>
+      <div class="erro inteiro" id="perfil-erro"></div>
       <button class="btn btn-ouro btn-bloco inteiro">Salvar</button>
     </form>`, (m) => {
     $('#form-perfil', m).onsubmit = async (e) => {
       e.preventDefault();
       const d = Object.fromEntries(new FormData(e.target));
-      const dadosPerfil = { nome: d.nome.trim(), telefone: d.telefone.replace(/\D/g, ''), email: usuario.email, criadoEm: new Date().toISOString() };
+      if (!cpfValido(d.cpf)) return ($('#perfil-erro', m).textContent = 'CPF inválido. Confira os números.');
+      const dadosPerfil = { nome: d.nome.trim(), telefone: d.telefone.replace(/\D/g, ''), cpf: d.cpf.replace(/\D/g, ''), endereco: d.endereco.trim(), email: usuario.email, criadoEm: new Date().toISOString() };
       perfil = { ...dadosPerfil, _uid: usuario.uid };
       await db.set('clientes', usuario.uid, dadosPerfil);
       atualizarBarraConta(); fecharModal(); depois && depois();
+    };
+  });
+}
+
+// Pede CPF e endereço (necessários para o contrato) a quem criou a conta antes dessa exigência
+function abrirDadosContrato(depois) {
+  abrirModal('Dados para o contrato', `
+    <p style="color:var(--cinza);font-size:14px;margin-bottom:14px">Para gerar o seu contrato de locação precisamos do seu CPF e endereço. Eles ficam protegidos na sua conta.</p>
+    <form id="form-doc" class="grade-form">
+      <label class="campo">CPF<input name="cpf" required inputmode="numeric" placeholder="000.000.000-00" maxlength="14"></label>
+      <label class="campo">Endereço completo<input name="endereco" required minlength="8" maxlength="150" placeholder="Rua, nº, bairro, cidade/UF"></label>
+      <div class="erro inteiro" id="doc-erro"></div>
+      <button class="btn btn-ouro btn-bloco inteiro">Continuar</button>
+    </form>`, (m) => {
+    $('#form-doc', m).onsubmit = async (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(e.target));
+      if (!cpfValido(d.cpf)) return ($('#doc-erro', m).textContent = 'CPF inválido. Confira os números.');
+      const dadosPerfil = { nome: perfil.nome, telefone: perfil.telefone, cpf: d.cpf.replace(/\D/g, ''), endereco: d.endereco.trim(), email: perfil.email || usuario.email, criadoEm: perfil.criadoEm || new Date().toISOString() };
+      try { await db.set('clientes', usuario.uid, dadosPerfil); } catch (err) { console.error(err); return ($('#doc-erro', m).textContent = 'Não foi possível salvar. Tente novamente.'); }
+      perfil = { ...dadosPerfil, _uid: usuario.uid };
+      depois && depois();
     };
   });
 }
@@ -276,13 +306,22 @@ async function abrirMinhas() {
       return `<small class="info-canc neg">Prazo de cancelamento encerrado (${DIAS_CANC} dias após o pagamento)</small>`;
     };
 
+    const linhaContrato = (i) => {
+      if (i.reserva && ['confirmada', 'concluida'].includes(i.status) && i.reserva.contrato) return `<button class="btn btn-claro btn-peq" style="margin-top:8px" data-contrato="${i.id}">📄 Baixar contrato</button>`;
+      if (i.codigo || i.status === 'pendente') return '<small class="info-canc" style="color:var(--cinza)">📄 O contrato fica disponível após a confirmação do pagamento.</small>';
+      return '';
+    };
     const corpo = $('#modal-raiz .modal-corpo');
     corpo.innerHTML = itens.length ? `<div class="lista-res">${itens.map((i) => `
       <div class="item-res" style="cursor:default;flex-wrap:wrap">
         <div class="meio"><b>${i.data ? br(i.data) : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · entrada ' + i.hora : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
         <div class="dir"><span class="selo ${i.st[1]}">${i.st[0]}</span><b>${fmt(i.total)}</b></div>
-        <div style="flex-basis:100%">${linhaCancel(i)}</div>
+        <div style="flex-basis:100%">${linhaCancel(i)}${linhaContrato(i)}</div>
       </div>`).join('')}</div>` : '<div class="vazio">Você ainda não tem reservas.<br>Escolha um dia livre no calendário!</div>';
+    corpo.querySelectorAll('[data-contrato]').forEach((b) => (b.onclick = () => {
+      const r = itens.find((i) => i.id === b.dataset.contrato).reserva;
+      abrirContrato(htmlContrato(r, r.contrato), `Contrato - ${info.nome} - ${br(r.data)}`);
+    }));
     corpo.querySelectorAll('[data-cancelar]').forEach((b) => (b.onclick = () => abrirCancelamento(itens.find((i) => i.id === b.dataset.cancelar))));
   } catch (e) {
     console.error(e);
@@ -330,6 +369,8 @@ function abrirPreReserva(iso) {
     <form id="form-pre" class="grade-form">
       <label class="campo inteiro">Nome<input name="cliente" required minlength="3" maxlength="80" value="${esc(perfil.nome)}"></label>
       <label class="campo">WhatsApp<input name="telefone" required inputmode="tel" value="${esc(foneFmt(perfil.telefone))}"></label>
+      <label class="campo">CPF<input name="cpf" required inputmode="numeric" value="${esc(cpfFmt(perfil.cpf))}"></label>
+      <label class="campo inteiro">Endereço<input name="endereco" required minlength="8" maxlength="150" value="${esc(perfil.endereco)}"></label>
       <label class="campo">Tipo de evento<input name="evento" list="ev" maxlength="60" placeholder="Aniversário, churrasco…">
         <datalist id="ev"><option>Aniversário</option><option>Confraternização</option><option>Chá de bebê</option><option>Churrasco</option><option>Day use</option></datalist></label>
       <div class="campo inteiro">Período
@@ -346,6 +387,8 @@ function abrirPreReserva(iso) {
       <div class="inteiro box-valores" style="margin:0" id="resumo"></div>
       ${info.regras ? `<div class="inteiro regras"><b>Regras do espaço</b><div>${esc(info.regras).replace(/\n/g, '<br>')}</div></div>
       <label class="inteiro" style="display:flex;gap:8px;align-items:flex-start;font-size:14px"><input type="checkbox" name="aceite" required style="margin-top:3px"> Li e concordo com as regras do espaço.</label>` : ''}
+      <div class="inteiro regras" style="max-height:none"><b>📄 Contrato de locação</b>Ao reservar você aceita eletronicamente o contrato de locação por temporada, com as regras de uso do espaço, da piscina, dos utensílios e de desistência. <button type="button" class="btn-link" id="ler-contrato" style="padding:0;font-size:13px">Ler o contrato</button></div>
+      <label class="inteiro" style="display:flex;gap:8px;align-items:flex-start;font-size:14px"><input type="checkbox" name="aceiteContrato" required style="margin-top:3px"> Li e aceito o contrato de locação.</label>
       <div class="erro inteiro" id="pre-erro"></div>
       <div class="modal-acoes inteiro" style="margin-top:0">
         <button type="button" class="btn btn-claro" data-fechar2>Voltar</button>
@@ -372,9 +415,15 @@ function abrirPreReserva(iso) {
     f.querySelectorAll('[name=periodo], [name=limpeza], [name=horaEntrada]').forEach((r) => (r.onchange = () => { resumo(); atualizarSaida(); }));
     resumo(); atualizarSaida();
     $('[data-fechar2]', m).onclick = fecharModal;
+    $('#ler-contrato', m).onclick = () => {
+      const v = valores();
+      const previa = { cliente: f.cliente.value, clienteCpf: f.cpf.value.replace(/\D/g, ''), clienteEndereco: f.endereco.value, telefone: f.telefone.value, clienteEmail: usuario.email, data: iso, periodo: f.periodo.value, horaEntrada: f.horaEntrada.value, evento: f.evento.value, valor: v.valor, taxaLimpeza: v.limpeza, pagamentos: [] };
+      abrirContrato(htmlContrato(previa, { clausulas: CLAUSULAS_PADRAO, ...(info.contrato || {}), nomeEspaco: info.nome }, { previa: true }), 'Contrato de locação (prévia)');
+    };
     f.onsubmit = async (e) => {
       e.preventDefault();
       const d = Object.fromEntries(new FormData(f));
+      if (!cpfValido(d.cpf)) return ($('#pre-erro', m).textContent = 'CPF inválido. Confira os números.');
       const tel = d.telefone.replace(/\D/g, '');
       if (tel.length < 10 || tel.length > 11) return ($('#pre-erro', m).textContent = 'Informe um WhatsApp válido com DDD.');
       if (marcados[iso]) return ($('#pre-erro', m).textContent = 'Essa data acabou de ser reservada. Escolha outro dia.');
@@ -385,7 +434,8 @@ function abrirPreReserva(iso) {
         cliente: d.cliente.trim().slice(0, 80), telefone: tel, data: iso, periodo: d.periodo, horaEntrada: d.horaEntrada,
         evento: (d.evento || '').trim().slice(0, 60), obs: (d.obs || '').trim().slice(0, 400),
         valor: v.valor, taxaLimpeza: v.limpeza, total: v.total, sinal: temPix ? v.sinal : 0,
-        codigo, status: 'aguardando', criadoEm: new Date().toISOString(), aceitouRegras: !!d.aceite || !info.regras
+        codigo, status: 'aguardando', criadoEm: new Date().toISOString(), aceitouRegras: !!d.aceite || !info.regras,
+        clienteCpf: d.cpf.replace(/\D/g, ''), clienteEndereco: d.endereco.trim().slice(0, 150), aceiteContrato: new Date().toISOString()
       };
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Enviando…';
       try {
