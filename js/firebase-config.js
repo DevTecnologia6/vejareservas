@@ -10,12 +10,12 @@
 //  (Esses dados NÃO são secretos — podem ficar no GitHub público.)
 // =====================================================================
 export const firebaseConfig = {
-  apiKey: "COLE_AQUI",
-  authDomain: "COLE_AQUI",
-  projectId: "COLE_AQUI",
-  storageBucket: "COLE_AQUI",
-  messagingSenderId: "COLE_AQUI",
-  appId: "COLE_AQUI"
+  apiKey: "AIzaSyDWjgx2GuVfJ06rr7imF9lXe37XaHjZkn8",
+  authDomain: "vejareservas.firebaseapp.com",
+  projectId: "vejareservas",
+  storageBucket: "vejareservas.firebasestorage.app",
+  messagingSenderId: "397876577086",
+  appId: "1:397876577086:web:91f7729e234d713d2b626f"
 };
 
 // =====================================================================
