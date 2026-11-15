@@ -2,6 +2,7 @@
 //  Calendário público — datas livres, conta do cliente, pré-reserva e Pix
 // =====================================================================
 import * as db from './db.js';
+import './limites.js';
 import { renderCalendario, MESES, addDias, datasDe, periodoTxt, saidaDate } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { abrirVisualizador } from './fotos.js';

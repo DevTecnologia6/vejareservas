@@ -2,6 +2,7 @@
 //  VejaReservas — painel administrativo
 // =====================================================================
 import * as db from './db.js';
+import './limites.js';
 import { renderCalendario, MESES, toISO, addDias, datasDe, periodoTxt, saidaDate } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { comprimir, abrirVisualizador } from './fotos.js';
@@ -942,6 +943,10 @@ function renderConfig(el) {
       imovelEndereco: d.imovelEndereco.trim(), foro: d.foro.trim(), clausulas: d.clausulas.trim() || CLAUSULAS_PADRAO, assinatura
     };
     if (cfg.locadorCpf && !cpfValido(cfg.locadorCpf)) return toast('Seu CPF parece inválido. Confira os números.');
+    const hs = cfg.horarios.split(/[,;\s]+/).filter(Boolean);
+    if (!hs.length || hs.some((h) => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(h))) return toast('Horários de entrada inválidos. Use o formato 08:00, 09:00, 14:30.');
+    cfg.horarios = hs.map((h) => h.padStart(5, '0')).join(', ');
+    if (cfg.whatsapp && cfg.whatsapp.length !== 11) return toast('WhatsApp deve ter DDD + 9 dígitos (11 números).');
     await db.set('config', 'geral', cfg);
     // dados que o calendário público pode ver
     await db.set('publico', 'info', {
