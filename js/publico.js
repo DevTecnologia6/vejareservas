@@ -3,7 +3,7 @@
 // =====================================================================
 import * as db from './db.js';
 import './limites.js';
-import { renderCalendario, MESES, addDias, datasDe, periodoTxt, saidaDate } from './calendar.js';
+import { renderCalendario, MESES, addDias, datasDe, periodoTxt, saidaDate, entradaSaidaTxt } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { abrirVisualizador } from './fotos.js';
 import { htmlContrato, abrirContrato, cpfFmt, cpfValido, CLAUSULAS_PADRAO } from './contrato.js';
@@ -383,7 +383,7 @@ async function abrirMinhas() {
     const corpo = $('#modal-raiz .modal-corpo');
     corpo.innerHTML = itens.length ? `<div class="lista-res">${itens.map((i) => `
       <div class="item-res" style="cursor:default;flex-wrap:wrap">
-        <div class="meio"><b>${i.data ? br(i.data) + ((+i.dias || 1) > 1 ? ` a ${br(addDias(i.data, i.dias - 1))}` : '') : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · entrada ' + i.hora : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
+        <div class="meio"><b>${i.data ? br(i.data) + ((+i.dias || 1) > 1 ? ` a ${br(addDias(i.data, i.dias - 1))}` : '') : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · ' + entradaSaidaTxt({ data: i.data, dias: i.dias, periodo: i.sol?.periodo || i.reserva?.periodo, horaEntrada: i.hora }) : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
         <div class="dir"><span class="selo ${i.st[1]}">${i.st[0]}</span><b>${fmt(i.total)}</b></div>
         <div style="flex-basis:100%">${linhaPagamento(i)}${linhaCancel(i)}${i.situacao === 'expirada' || i.situacao === 'recusada' ? '' : linhaContrato(i)}</div>
       </div>`).join('')}</div>` : '<div class="vazio">Você ainda não tem reservas.<br>Escolha um dia livre no calendário!</div>';
@@ -463,9 +463,10 @@ function abrirPreReserva(iso, dias = 1) {
           <label><input type="radio" name="periodo" value="12h"><span><b>12 horas</b><small>${fmt(info.preco12)}</small></span></label>
         </div>
       </div>`}
-      <label class="campo inteiro">Horário de entrada *
+      ${listaHorarios().length > 1 ? `<label class="campo inteiro">Horário de entrada *
         <select name="horaEntrada" required>${listaHorarios().map((h) => `<option ${h === (info.horaEntrada || '').padStart(5, '0') ? 'selected' : ''}>${h}</option>`).join('')}</select>
-        <span class="horario-info" id="saida-info"></span></label>
+        <span class="horario-info" id="saida-info"></span></label>` : `<div class="campo inteiro">Horário<input type="hidden" name="horaEntrada" value="${listaHorarios()[0]}">
+        <span class="horario-info" id="saida-info" style="font-size:14px"></span></div>`}
       ${+info.taxaLimpeza > 0 ? `<label class="inteiro opc-extra"><input type="checkbox" name="limpeza"><span><b>Quero a limpeza pós-evento</b><small>+ ${fmt(info.taxaLimpeza)} · nossa equipe cuida da limpeza depois da sua festa</small></span></label>` : ''}
       <label class="campo inteiro">Observações (opcional)<textarea name="obs" maxlength="400" placeholder="Ex.: número de convidados, pedidos especiais…"></textarea></label>
       <div class="inteiro box-valores" style="margin:0" id="resumo"></div>
@@ -554,7 +555,7 @@ function abrirPreReserva(iso, dias = 1) {
 }
 
 function mostrarConfirmacao(sol, temPix, solId) {
-  const msgZap = `Olá! Fiz a pré-reserva *${sol.codigo}* pelo site para ${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))} (${sol.dias} diárias` : `o dia ${br(sol.data)} (${sol.periodo}`}, entrada às ${sol.horaEntrada}) em nome de ${sol.cliente}.` + (temPix ? ` Segue o comprovante do Pix de ${fmt(sol.sinal)}.` : ' Aguardo a confirmação!');
+  const msgZap = `Olá! Fiz a pré-reserva *${sol.codigo}* pelo site para ${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))} (${sol.dias} diárias` : `o dia ${br(sol.data)} (${sol.periodo}`}, ${entradaSaidaTxt(sol)}) em nome de ${sol.cliente}.` + (temPix ? ` Segue o comprovante do Pix de ${fmt(sol.sinal)}.` : ' Aguardo a confirmação!');
   let pixHtml = '';
   if (temPix) {
     const copiaECola = gerarPix({ ...info.pix, valor: sol.sinal, txid: sol.codigo });
@@ -570,7 +571,7 @@ function mostrarConfirmacao(sol, temPix, solId) {
   abrirModal('Pré-reserva enviada! 🎉', `
     <div style="text-align:center">
       <p style="margin-bottom:6px">Código da sua reserva: <b style="color:var(--ouro-esc);font-size:18px">${esc(sol.codigo)}</b></p>
-      <p style="color:var(--cinza);font-size:14px;margin-bottom:16px">${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))}` : diaExtenso(sol.data)} · ${periodoTxt(sol)} · entrada ${sol.horaEntrada} · total ${fmt(sol.total)}</p>
+      <p style="color:var(--cinza);font-size:14px;margin-bottom:16px">${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))}` : diaExtenso(sol.data)} · ${periodoTxt(sol)} · ${entradaSaidaTxt(sol)} · total ${fmt(sol.total)}</p>
       ${pixHtml}
       <div class="prazo-pag" id="prazo-box">⏳ Você tem <b id="prazo-tempo">--:--</b> para pagar e tocar em <b>Já paguei</b>. Depois disso a pré-reserva é cancelada automaticamente e ${(+sol.dias || 1) > 1 ? 'as datas voltam' : 'a data volta'} a ficar livre.</div>
       <button class="btn btn-verde btn-bloco" id="ja-paguei" style="margin-top:12px">${ZAP} Já paguei — enviar comprovante</button>
