@@ -1,0 +1,26 @@
+name: Lembrete de locação (WhatsApp)
+
+on:
+  schedule:
+    - cron: '0 12 * * *'   # todo dia às 09:00 (horário de Brasília)
+  workflow_dispatch:         # botão "Run workflow" para testar na hora
+    inputs:
+      data_teste:
+        description: 'Testar com uma data específica (AAAA-MM-DD) — deixe vazio para amanhã'
+        required: false
+
+jobs:
+  lembrete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --prefix lembrete --no-audit --no-fund
+      - run: node lembrete/enviar.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          DATA_TESTE: ${{ github.event.inputs.data_teste }}

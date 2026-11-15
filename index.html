@@ -3,78 +3,89 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#a8782e">
-  <title>VejaReservas · Espaço Veja</title>
+  <meta name="theme-color" content="#0f0c08">
+  <title>Datas disponíveis · Espaço Veja</title>
+  <meta name="description" content="Consulte as datas disponíveis do Espaço Veja e reserve pelo WhatsApp.">
+  <meta property="og:title" content="Espaço Veja · Datas disponíveis">
+  <meta property="og:description" content="Veja os dias livres e reserve pelo WhatsApp.">
+  <meta property="og:image" content="assets/banner.jpg">
   <link rel="icon" href="assets/logo.png">
-  <link rel="apple-touch-icon" href="assets/logo.png">
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    body { background: var(--creme); }
+    .pub-topo { position: relative; height: 230px; background: #0f0c08 url('assets/banner.jpg') center/cover; display: flex; align-items: flex-end; justify-content: center; }
+    .pub-topo::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,12,8,.25) 0%, rgba(15,12,8,.9) 100%); }
+    .pub-topo .marca { position: relative; text-align: center; padding-bottom: 22px; }
+    .pub-topo h1 { font-family: 'Cormorant Garamond', serif; color: var(--ouro-claro); font-size: 40px; line-height: 1; margin-top: 10px; }
+    .pub-topo p { color: #fff; letter-spacing: 4px; font-size: 11px; text-transform: uppercase; margin-top: 6px; }
+    .pub-wrap { max-width: 560px; margin: -10px auto 0; padding: 0 14px 40px; position: relative; }
+    .pub-wrap .card { padding: 22px 18px; }
+    .pub-dica { text-align: center; color: var(--cinza); font-size: 14px; margin: 4px 0 14px; }
+    .pub-sel { margin-top: 16px; text-align: center; min-height: 90px; }
+    .pub-sel b { display: block; font-size: 17px; margin-bottom: 10px; }
+    .pub-rodape { text-align: center; color: var(--cinza); font-size: 12px; margin-top: 18px; }
+    .cal-livre:not(.cal-passado) { border-color: #d9e9dd; }
+    .cal-dia.sel { background: var(--grad); color: #fff; border-color: transparent; }
+    .pub-sel .btn { margin-top: 2px; }
+    #tela-acesso { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 14px; background: linear-gradient(180deg, rgba(15,12,8,.55), rgba(15,12,8,.92)), #0f0c08 url('assets/banner.jpg') center/cover fixed; }
+    .acesso-card { width: 100%; max-width: 430px; background: var(--branco); border-radius: 22px; padding: 30px 24px 22px; box-shadow: 0 20px 60px rgba(0,0,0,.4); text-align: center; }
+    .acesso-marca { font-family: 'Cormorant Garamond', serif; font-size: 34px; margin-top: 12px; line-height: 1; }
+    .sub-ouro { color: var(--ouro); font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; margin: 6px 0 20px; }
+    .acesso-titulo { font-size: 20px; margin-bottom: 4px; }
+    .acesso-sub { color: var(--cinza); font-size: 14px; margin-bottom: 14px; }
+    #acesso-corpo .chips { justify-content: center; }
+    #acesso-corpo form { text-align: left; }
+    .pub-conta { position: absolute; top: 12px; right: 12px; z-index: 2; display: flex; align-items: center; gap: 8px; color: #fff; font-size: 13px; flex-wrap: wrap; justify-content: flex-end; }
+    .pub-conta .btn-claro { background: rgba(255,255,255,.95); }
+    .pub-conta .btn-link { color: #fff; }
+  </style>
 </head>
 <body>
-
-  <!-- ============ LOGIN ============ -->
-  <section id="tela-login" class="oculto">
-    <div class="login-card">
-      <img src="assets/logo.png" class="logo-img" alt="Espaço Veja">
-      <h1>VejaReservas</h1>
-      <p class="sub">Espaço Veja · Painel</p>
-      <div id="aviso-demo" class="aviso-demo oculto">
-        <b>Modo demonstração.</b> O Firebase ainda não foi configurado — os dados ficam salvos só neste navegador. Entre com qualquer e-mail.
-      </div>
-      <form id="form-login">
-        <label class="campo">E-mail
-          <input type="email" id="login-email" required autocomplete="username">
-        </label>
-        <label class="campo">Senha
-          <input type="password" id="login-senha" autocomplete="current-password">
-        </label>
-        <div class="erro" id="login-erro"></div>
-        <button class="btn btn-ouro btn-bloco" type="submit">Entrar</button>
-        <button type="button" class="btn-link" id="esqueci-admin" style="justify-self:center">Esqueci minha senha</button>
-      </form>
-      <div class="login-seguro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg> Área restrita ao proprietário · conexão segura</div>
+  <!-- ============ ACESSO OBRIGATÓRIO ============ -->
+  <section id="tela-acesso">
+    <div class="acesso-card">
+      <img src="assets/logo.png" class="logo-img" style="width:84px;height:84px" alt="Espaço Veja">
+      <div class="acesso-marca">Espaço Veja</div>
+      <p class="sub-ouro">Conforto &amp; Lazer · Reservas</p>
+      <div id="acesso-corpo"><div class="vazio">Carregando…</div></div>
+      <div id="selo-acesso" style="margin-top:18px"></div>
     </div>
   </section>
 
-  <!-- ============ APP ============ -->
-  <section id="tela-app" class="oculto">
-    <aside class="sidebar">
-      <div class="marca">
-        <img src="assets/logo.png" class="logo-img" alt="Espaço Veja">
-        <h2 id="nome-espaco">Espaço Veja</h2>
-        <span>Espaço para eventos</span>
-      </div>
-      <div class="menu-titulo">Menu principal</div>
-      <nav class="menu" id="menu"></nav>
-      <div class="rodape">
-        <div class="avatar">EV</div>
-        <div class="info"><b>Proprietário</b><small id="usuario-email"></small></div>
-        <button class="btn-sair" id="btn-sair" title="Sair">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-        </button>
-      </div>
-    </aside>
+  <!-- ============ ÁREA DO CLIENTE ============ -->
+  <div id="app-cliente" class="oculto">
+  <header class="pub-topo">
+    <div class="pub-conta" id="conta"></div>
+    <div class="marca">
+      <img src="assets/logo.png" class="logo-img" style="width:78px;height:78px;border:2px solid var(--ouro-claro)" alt="">
+      <h1 id="pub-nome">Espaço Veja</h1>
+      <p>Conforto &amp; Lazer</p>
+    </div>
+  </header>
 
-    <main>
-      <div id="faixa-demo" class="faixa-demo oculto">⚠ Modo demonstração — configure o Firebase em <code>js/firebase-config.js</code> para salvar os dados na nuvem.</div>
-      <div class="topo">
-        <div>
-          <div class="migalha"><b>VEJARESERVAS</b> / <span id="migalha-pagina">Espaço Veja</span></div>
-          <h1 id="titulo-pagina">Visão geral</h1>
-        </div>
-        <button class="btn btn-ouro" data-acao="nova-reserva">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-          <span class="txt">Nova reserva</span>
-        </button>
+  <div class="pub-wrap">
+    <div class="card oculto" id="card-fotos" style="margin-bottom:14px;padding:16px">
+      <div class="card-topo" style="margin-bottom:10px"><h3>📷 Conheça o espaço</h3><button class="btn-link" id="ver-fotos">Ver todas</button></div>
+      <div class="galeria" id="galeria"></div>
+    </div>
+    <div class="card">
+      <div class="card-topo" style="justify-content:center;gap:14px;flex-wrap:nowrap">
+        <button class="btn-icone" id="ant" aria-label="Mês anterior"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg></button>
+        <h3 id="mes" style="min-width:190px;text-align:center"></h3>
+        <button class="btn-icone" id="prox" aria-label="Próximo mês"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg></button>
       </div>
-      <div id="conteudo"></div>
-    </main>
-
-    <nav class="nav-mobile" id="nav-mobile"></nav>
-  </section>
+      <p class="pub-dica">Toque em um dia livre para pedir a reserva pelo WhatsApp.</p>
+      <div class="cal-legenda" style="justify-content:center"><span><i></i>Disponível</span><span><i class="res"></i>Reservado</span><span><i class="pen"></i>Em negociação</span></div>
+      <div id="cal"><div class="vazio">Carregando datas…</div></div>
+      <div class="pub-sel" id="sel"></div>
+    </div>
+    <div id="selo" style="margin-top:16px"></div>
+    <p class="pub-rodape">Disponibilidade atualizada automaticamente · VejaReservas</p>
+  </div>
+  </div>
 
   <div id="modal-raiz"></div>
-
   <script src="js/vendor/qrcode.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/publico.js"></script>
 </body>
 </html>

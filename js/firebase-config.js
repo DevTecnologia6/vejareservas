@@ -24,4 +24,8 @@ export const firebaseConfig = {
 //  um alerta vermelho "Este NÃO é o site oficial" e esconde o Pix.
 //  Deixe vazio enquanto ainda não tiver o domínio configurado.
 // =====================================================================
-export const dominioOficial = "";
+export const dominioOficial = "espacoveja.devtecnologia.app.br";
+
+// Outros endereços SEUS onde o site também pode abrir sem alerta
+// (útil enquanto o domínio novo não fica pronto). Pode apagar depois.
+export const dominiosPermitidos = ["devtecnologia.app.br", "devtecnologia6.github.io"];
