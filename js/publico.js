@@ -15,12 +15,26 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const foneFmt = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d; };
 const ZAP = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z"/></svg>';
 const CADEADO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
-const ST_SOL = { aguardando: ['Aguardando confirmação', 'st-pendente'], recusada: ['Não aprovada', 'st-cancelada'] };
+const ST_SOL = { aguardando: ['Aguardando pagamento', 'st-pendente'], informado: ['Pagamento informado', 'st-pendente'], recusada: ['Não aprovada', 'st-cancelada'], expirada: ['Expirada', 'st-cancelada'] };
+// situação da pré-reserva considerando o prazo de pagamento
+const situacaoSol = (s) => (s.status && s.status !== 'aguardando' ? s.status : s.pagoInformadoEm ? 'informado' : s.expiraEm && Date.now() > s.expiraEm ? 'expirada' : 'aguardando');
+const mmss = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+let timers = [];
+const limparTimers = () => { timers.forEach(clearInterval); timers = []; };
+function contagem(el, expiraEm, aoAcabar) {
+  const tick = () => { const r = expiraEm - Date.now(); el.textContent = mmss(r); if (r <= 0) { clearInterval(id); aoAcabar && aoAcabar(); } };
+  const id = setInterval(tick, 1000); timers.push(id); tick();
+}
+// cliente avisa que pagou: a pré-reserva para de expirar e a data fica segurada até o dono aprovar
+async function informarPagamento(id, sol) {
+  await db.update('solicitacoes', id, { pagoInformadoEm: new Date().toISOString() });
+  for (const d of datasDe(sol)) { try { await db.set('ocupacao', d, { status: 'pendente', sol: id }); } catch (e) { console.warn(e); } }
+}
 const ST_RES = { pendente: ['Pendente', 'st-pendente'], confirmada: ['Confirmada', 'st-confirmada'], congelada: ['Congelada (crédito)', 'st-congelada'], concluida: ['Concluída', 'st-concluida'], cancelada: ['Cancelada', 'st-cancelada'] };
 
 let mes = new Date(); mes.setDate(1);
 let marcados = {};
-let info = { nome: 'Espaço Veja', whatsapp: '', preco12: 770, preco24: 1000, taxaLimpeza: 75, horaEntrada: '09:00', horarios: '08:00, 09:00, 10:00, 12:00, 14:00', sinalPct: 50, preReserva: true, regras: '', pix: null };
+let info = { nome: 'Espaço Veja', whatsapp: '', preco12: 770, preco24: 1000, taxaLimpeza: 75, horaEntrada: '09:00', horarios: '08:00, 09:00, 10:00, 12:00, 14:00', sinalPct: 50, preReserva: true, regras: '', pix: null, prazoPagamentoMin: 30 };
 let usuario = null;   // { uid, email, emailVerified }
 let perfil = null;    // { nome, telefone }
 let fotos = [];
@@ -130,7 +144,7 @@ function abrirModal(titulo, corpo, aoMontar) {
   $('[data-fechar]', raiz).onclick = fecharModal;
   aoMontar && aoMontar($('.modal', raiz));
 }
-const fecharModal = () => ($('#modal-raiz').innerHTML = '');
+const fecharModal = () => { limparTimers(); $('#modal-raiz').innerHTML = ''; };
 
 // ---------------------------------------------------------------- tela de acesso (obrigatória)
 function abrirAcesso(titulo, corpo, aoMontar) {
@@ -323,7 +337,7 @@ async function abrirMinhas() {
     ]);
     const cancPor = Object.fromEntries(cancs.map((c) => [c.id, c]));
     const itens = [
-      ...sols.map((s) => ({ data: s.data, dias: s.dias, periodo: periodoTxt(s), hora: s.horaEntrada, total: s.total, codigo: s.codigo, st: ST_SOL[s.status || 'aguardando'] })),
+      ...sols.map((s) => ({ sol: s, solId: s.id, situacao: situacaoSol(s), data: s.data, dias: s.dias, periodo: periodoTxt(s), hora: s.horaEntrada, total: s.total, codigo: s.codigo, st: ST_SOL[situacaoSol(s)] || ST_SOL.aguardando })),
       ...res.map((r) => {
         const total = (+r.valor || 0) + (+r.taxaLimpeza || 0);
         const pago = (r.pagamentos || []).reduce((t, p) => t + +p.valor, 0);
@@ -339,6 +353,13 @@ async function abrirMinhas() {
       return `<small class="info-canc neg">Prazo de cancelamento encerrado (${DIAS_CANC} dias após o pagamento)</small>`;
     };
 
+    const linhaPagamento = (i) => {
+      if (!i.sol) return '';
+      if (i.situacao === 'aguardando') return `<div class="info-canc"><small>⏳ Pague e toque em "Já paguei" em <b data-cont="${i.solId}">--:--</b></small> <button class="btn-link" style="color:var(--verde)" data-pagou="${i.solId}">Já paguei</button></div>`;
+      if (i.situacao === 'informado') return '<small class="info-canc">✅ Pagamento informado — aguardando a confirmação do Espaço Veja.</small>';
+      if (i.situacao === 'expirada') return `<small class="info-canc neg">O pagamento não foi informado em ${+info.prazoPagamentoMin || 30} minutos e a pré-reserva expirou.</small>`;
+      return '';
+    };
     const linhaContrato = (i) => {
       if (i.reserva && ['confirmada', 'concluida'].includes(i.status) && i.reserva.contrato) return `<button class="btn btn-claro btn-peq" style="margin-top:8px" data-contrato="${i.id}">📄 Baixar contrato</button>`;
       if (i.codigo || i.status === 'pendente') return '<small class="info-canc" style="color:var(--cinza)">📄 O contrato fica disponível após a confirmação do pagamento.</small>';
@@ -349,13 +370,22 @@ async function abrirMinhas() {
       <div class="item-res" style="cursor:default;flex-wrap:wrap">
         <div class="meio"><b>${i.data ? br(i.data) + ((+i.dias || 1) > 1 ? ` a ${br(addDias(i.data, i.dias - 1))}` : '') : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · entrada ' + i.hora : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
         <div class="dir"><span class="selo ${i.st[1]}">${i.st[0]}</span><b>${fmt(i.total)}</b></div>
-        <div style="flex-basis:100%">${linhaCancel(i)}${linhaContrato(i)}</div>
+        <div style="flex-basis:100%">${linhaPagamento(i)}${linhaCancel(i)}${i.situacao === 'expirada' || i.situacao === 'recusada' ? '' : linhaContrato(i)}</div>
       </div>`).join('')}</div>` : '<div class="vazio">Você ainda não tem reservas.<br>Escolha um dia livre no calendário!</div>';
     corpo.querySelectorAll('[data-contrato]').forEach((b) => (b.onclick = () => {
       const r = itens.find((i) => i.id === b.dataset.contrato).reserva;
       abrirContrato(htmlContrato(r, r.contrato), `Contrato - ${info.nome} - ${br(r.data)}`);
     }));
     corpo.querySelectorAll('[data-cancelar]').forEach((b) => (b.onclick = () => abrirCancelamento(itens.find((i) => i.id === b.dataset.cancelar))));
+    limparTimers();
+    corpo.querySelectorAll('[data-cont]').forEach((el) => { const i = itens.find((x) => x.solId === el.dataset.cont); contagem(el, i.sol.expiraEm, () => abrirMinhas()); });
+    corpo.querySelectorAll('[data-pagou]').forEach((b) => (b.onclick = async () => {
+      const i = itens.find((x) => x.solId === b.dataset.pagou);
+      const msg = `Olá! Fiz a pré-reserva *${i.codigo}* pelo site para ${br(i.data)} e já paguei o sinal de ${fmt(i.sol.sinal)}. Segue o comprovante.`;
+      const janela = info.whatsapp ? window.open(linkZap(msg), '_blank') : null;
+      try { await informarPagamento(i.solId, i.sol); } catch (e) { console.error(e); janela?.close(); alert('O prazo terminou. Fale com a gente pelo WhatsApp.'); }
+      abrirMinhas();
+    }));
   } catch (e) {
     console.error(e);
     $('#modal-raiz .modal-corpo').innerHTML = '<div class="vazio">Não foi possível carregar agora. Tente novamente.</div>';
@@ -476,15 +506,15 @@ function abrirPreReserva(iso, dias = 1) {
         cliente: r.cliente.slice(0, 80), telefone: r.telefone, data: iso, dias, periodo: r.periodo, horaEntrada: r.horaEntrada,
         evento: r.evento.slice(0, 60), obs: (d.obs || '').trim().slice(0, 400),
         valor: r.valor, taxaLimpeza: r.taxaLimpeza, total: r.total, sinal: temPix ? r.sinal : 0,
-        codigo, status: 'aguardando', criadoEm: new Date().toISOString(), aceitouRegras: !!d.aceite || !info.regras,
+        codigo, status: 'aguardando', criadoEm: new Date().toISOString(), expiraEm: Date.now() + (+info.prazoPagamentoMin || 30) * 60000, aceitouRegras: !!d.aceite || !info.regras,
         clienteCpf: r.clienteCpf, clienteEndereco: String(r.clienteEndereco || '').slice(0, 150), aceiteContrato: new Date().toISOString()
       };
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Enviando…';
       try {
-        await db.add('solicitacoes', sol);
-        for (const x of datas) { try { await db.set('ocupacao', x, { status: 'pendente' }); } catch { /* já marcada */ } marcados[x] = 'pendente'; }
+        const solId = await db.add('solicitacoes', sol);
+        for (const x of datas) { try { await db.set('ocupacao', x, { status: 'pendente', expiraEm: sol.expiraEm, sol: solId }); } catch (e) { console.warn(e); } marcados[x] = 'pendente'; }
         selecao = { ini: null, fim: null }; desenhar(); $('#sel').innerHTML = '';
-        mostrarConfirmacao(sol, temPix);
+        mostrarConfirmacao(sol, temPix, solId);
       } catch (err) {
         console.error(err); btn.disabled = false; btn.textContent = 'Tentar novamente';
         $('#pre-erro', m).textContent = 'Não foi possível enviar agora. Tente de novo ou fale pelo WhatsApp.';
@@ -493,7 +523,7 @@ function abrirPreReserva(iso, dias = 1) {
   });
 }
 
-function mostrarConfirmacao(sol, temPix) {
+function mostrarConfirmacao(sol, temPix, solId) {
   const msgZap = `Olá! Fiz a pré-reserva *${sol.codigo}* pelo site para ${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))} (${sol.dias} diárias` : `o dia ${br(sol.data)} (${sol.periodo}`}, entrada às ${sol.horaEntrada}) em nome de ${sol.cliente}.` + (temPix ? ` Segue o comprovante do Pix de ${fmt(sol.sinal)}.` : ' Aguardo a confirmação!');
   let pixHtml = '';
   if (temPix) {
@@ -512,9 +542,34 @@ function mostrarConfirmacao(sol, temPix) {
       <p style="margin-bottom:6px">Código da sua reserva: <b style="color:var(--ouro-esc);font-size:18px">${sol.codigo}</b></p>
       <p style="color:var(--cinza);font-size:14px;margin-bottom:16px">${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))}` : diaExtenso(sol.data)} · ${periodoTxt(sol)} · entrada ${sol.horaEntrada} · total ${fmt(sol.total)}</p>
       ${pixHtml}
-      <p style="color:var(--cinza);font-size:14px;margin:16px 0">${temPix ? 'Depois de pagar, envie o comprovante pelo WhatsApp. A data fica <b>em negociação</b> até a confirmação do pagamento. Acompanhe em <b>Minhas reservas</b>.' : 'Sua data ficou <b>em negociação</b>. Em breve entraremos em contato pelo WhatsApp para confirmar.'}</p>
-      ${info.whatsapp ? `<a class="btn btn-verde btn-bloco" target="_blank" rel="noopener" href="${linkZap(msgZap)}">${ZAP} ${temPix ? 'Enviar comprovante no WhatsApp' : 'Falar no WhatsApp'}</a>` : ''}
+      <div class="prazo-pag" id="prazo-box">⏳ Você tem <b id="prazo-tempo">--:--</b> para pagar e tocar em <b>Já paguei</b>. Depois disso a pré-reserva é cancelada automaticamente e ${(+sol.dias || 1) > 1 ? 'as datas voltam' : 'a data volta'} a ficar livre.</div>
+      <button class="btn btn-verde btn-bloco" id="ja-paguei" style="margin-top:12px">${ZAP} Já paguei — enviar comprovante</button>
+      <p style="color:var(--cinza);font-size:13px;margin-top:12px">Depois de tocar em "Já paguei", ${(+sol.dias || 1) > 1 ? 'as datas ficam seguradas' : 'a data fica segurada'} até confirmarmos o pagamento. Acompanhe em <b>Minhas reservas</b>.</p>
     </div>`, (m) => {
+    limparTimers();
+    contagem($('#prazo-tempo', m), sol.expiraEm, () => {
+      if ($('#ja-paguei', m)?.disabled) return;
+      $('#prazo-box', m).innerHTML = '⌛ <b>Tempo esgotado.</b> A pré-reserva foi cancelada. Escolha a data novamente no calendário.';
+      $('#prazo-box', m).classList.add('esgotado'); $('#ja-paguei', m).remove();
+      datasDe(sol).forEach((d) => delete marcados[d]); desenhar();
+    });
+    $('#ja-paguei', m).onclick = async (e) => {
+      const btn = e.currentTarget;
+      const janela = info.whatsapp ? window.open(linkZap(msgZap), '_blank') : null;
+      btn.disabled = true; btn.textContent = 'Registrando…';
+      try {
+        await informarPagamento(solId, sol);
+        limparTimers();
+        $('#prazo-box', m).innerHTML = '✅ <b>Pagamento informado!</b> Agora é só aguardar a nossa confirmação. Se o WhatsApp não abriu, envie o comprovante para o nosso número.';
+        $('#prazo-box', m).classList.add('ok');
+        btn.innerHTML = `${ZAP} Abrir WhatsApp de novo`; btn.disabled = false;
+        btn.onclick = () => info.whatsapp && window.open(linkZap(msgZap), '_blank');
+      } catch (err) {
+        console.error(err); janela?.close();
+        btn.disabled = false; btn.innerHTML = `${ZAP} Já paguei — enviar comprovante`;
+        $('#prazo-box', m).innerHTML = '⚠️ O prazo terminou ou houve um erro. Fale com a gente pelo WhatsApp.';
+      }
+    };
     $('#pix-copiar', m)?.addEventListener('click', async (e) => {
       try { await navigator.clipboard.writeText($('#pix-code', m).textContent); e.target.textContent = 'Copiado ✓'; }
       catch { const r = document.createRange(); r.selectNode($('#pix-code', m)); getSelection().removeAllRanges(); getSelection().addRange(r); }
@@ -528,7 +583,7 @@ async function carregarApp() {
     const [pub, ocup] = await Promise.all([db.get('publico', 'info'), db.list('ocupacao')]);
     if (pub) info = { ...info, ...pub };
     else if (db.modoDemo) { const cfg = await db.get('config', 'geral'); if (cfg) info = { ...info, ...cfg, whatsapp: cfg.whatsapp ? '55' + cfg.whatsapp.replace(/^55/, '') : '' }; }
-    marcados = Object.fromEntries(ocup.map((o) => [o.id, o.status || 'reservado']));
+    marcados = Object.fromEntries(ocup.filter((o) => !(o.status === 'pendente' && o.expiraEm && Date.now() > o.expiraEm)).map((o) => [o.id, o.status || 'reservado']));
     $('#pub-nome').textContent = info.nome;
     document.title = `Datas disponíveis · ${info.nome}`;
     $('.pub-dica').textContent = info.preReserva ? 'Toque em um dia livre para reservar.' : 'Toque em um dia livre para pedir a reserva pelo WhatsApp.';

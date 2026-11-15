@@ -65,7 +65,7 @@ function prazoCancelamento(r) {
 const fmtDataHora = (ms) => { const d = new Date(ms); return `${br(toISO(d))} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const CONFIG_PADRAO = {
   nome: 'Espaço Veja', preco12: 770, preco24: 1000, taxaLimpeza: 75, horaEntrada: '09:00', horarios: '08:00, 09:00, 10:00, 12:00, 14:00', whatsapp: '',
-  preReserva: true, sinalPct: 50, regras: REGRAS_PADRAO,
+  preReserva: true, sinalPct: 50, prazoPagamentoMin: 30, regras: REGRAS_PADRAO,
   pixTipo: 'celular', pixChave: '', pixNome: '', pixCidade: '',
   locadorNome: '', locadorCpf: '', locadorEndereco: '', imovelEndereco: '', foro: 'Serra/ES', clausulas: CLAUSULAS_PADRAO, assinatura: ''
 };
@@ -95,9 +95,17 @@ async function carregar() {
   const [reservas, despesas, cfg, sols, canc] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes').catch(() => []), db.list('cancelamentos').catch(() => [])]);
   state.cancelamentos = canc.filter((x) => x.status === 'pendente');
   state.reservas = reservas;
-  state.solicitacoes = sols.filter((x) => x.status !== 'recusada').sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  const expiradas = sols.filter((x) => (!x.status || x.status === 'aguardando') && !x.pagoInformadoEm && x.expiraEm && Date.now() > x.expiraEm);
+  state.solicitacoes = sols.filter((x) => !['recusada', 'expirada'].includes(x.status) && !expiradas.includes(x)).sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  state._expiradas = expiradas;
   state.despesas = despesas;
   state.config = { ...CONFIG_PADRAO, ...(cfg || {}) };
+  // pré-reservas que passaram do prazo de pagamento: marca como expiradas e libera as datas
+  if (state._expiradas?.length) {
+    for (const x of state._expiradas) await db.update('solicitacoes', x.id, { status: 'expirada' }).catch(() => {});
+    await sincronizarOcupacao(...state._expiradas.flatMap((x) => datasDe(x))).catch(() => {});
+    state._expiradas = [];
+  }
   // reservas confirmadas antes do recurso de contrato: grava os dados do contrato agora
   if (state.config.locadorNome) {
     for (const r of state.reservas.filter((x) => ['confirmada', 'concluida'].includes(x.status) && !x.contrato)) {
@@ -115,7 +123,10 @@ async function sincronizarOcupacao(...datas) {
     const temSol = state.solicitacoes.some(cobre);
     const ocupada = temSol || state.reservas.some((r) => cobre(r) && OCUPA.includes(r.status));
     const pendente = ocupada && !state.reservas.some((r) => cobre(r) && ['confirmada', 'concluida'].includes(r.status));
-    if (ocupada) await db.set('ocupacao', data, { status: pendente ? 'pendente' : 'reservado' });
+    // se só há pré-reservas do site ainda não pagas, a data fica segurada só até o prazo delas
+    const sols = state.solicitacoes.filter(cobre);
+    const soSolsNaoPagas = !state.reservas.some((r) => cobre(r) && OCUPA.includes(r.status)) && sols.length && sols.every((x) => !x.pagoInformadoEm && x.expiraEm);
+    if (ocupada) await db.set('ocupacao', data, soSolsNaoPagas ? { status: 'pendente', expiraEm: Math.max(...sols.map((x) => x.expiraEm)), sol: sols[0].id } : { status: pendente ? 'pendente' : 'reservado' });
     else await db.remove('ocupacao', data).catch(() => {});
   }
 }
@@ -223,6 +234,7 @@ function blocoSolicitacoes() {
       <div class="item-res">
         <div class="ico">${ICO.cal}</div>
         <div class="meio"><b>${esc(x.cliente)}</b><small>${datasTxt(x)} — ${esc(x.evento || 'Evento')} · ${periodoTxt(x)}${x.horaEntrada ? ' · entrada ' + x.horaEntrada : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
+          <small style="display:block;margin:2px 0">${x.pagoInformadoEm ? '<span class="selo st-confirmada">💰 Cliente informou o pagamento — confira o Pix</span>' : x.expiraEm ? `<span class="selo st-pendente">⏳ Aguardando pagamento · expira às ${new Date(x.expiraEm).toTimeString().slice(0, 5)}</span>` : ''}</small>
           <small style="display:block">${foneFmt(x.telefone)}${x.email ? ` · ${esc(x.email)}` : ''}${x.sinal ? ` · sinal via Pix: ${fmt(x.sinal)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small></div>
         <div class="dir"><b style="margin:0 0 8px">${fmt(x.total)}</b><div class="acoes">
           <a class="btn btn-verde btn-peq" target="_blank" rel="noopener" title="WhatsApp" href="https://wa.me/${foneBR(x.telefone)}?text=${encodeURIComponent(`Olá, ${x.cliente.split(' ')[0]}! Recebemos sua pré-reserva ${x.codigo} do ${state.config.nome} para ${br(x.data)}.`)}">${ICO.zap}</a>
@@ -830,6 +842,8 @@ function renderConfig(el) {
             <label class="inteiro" style="display:flex;gap:10px;align-items:center;font-weight:600"><input type="checkbox" name="preReserva" ${c.preReserva ? 'checked' : ''} style="width:18px;height:18px"> Permitir que o cliente faça a pré-reserva pelo calendário</label>
             <label class="campo inteiro">Sinal para garantir a data
               <select name="sinalPct">${[30, 50, 100].map((n) => `<option value="${n}" ${+c.sinalPct === n ? 'selected' : ''}>${n === 100 ? 'Valor total (100%)' : n + '% do total'}</option>`).join('')}</select></label>
+            <label class="campo inteiro">Tempo para o cliente pagar (minutos)<input type="number" name="prazoPagamentoMin" min="5" max="1440" value="${+c.prazoPagamentoMin || 30}">
+              <small style="font-weight:400">Se o cliente não pagar e tocar em "Já paguei" nesse tempo, a pré-reserva expira e a data é liberada.</small></label>
             <label class="campo inteiro">Regras do espaço (o cliente precisa aceitar)<textarea name="regras" rows="5">${esc(c.regras)}</textarea></label>
           </div>
         </div>
@@ -913,7 +927,7 @@ function renderConfig(el) {
     const cfg = {
       nome: d.nome.trim() || 'Espaço Veja', preco12: +d.preco12, preco24: +d.preco24, taxaLimpeza: +d.taxaLimpeza,
       horaEntrada: d.horaEntrada, horarios: d.horarios.trim(), whatsapp: soDigitos(d.whatsapp),
-      preReserva: !!d.preReserva, sinalPct: +d.sinalPct, regras: d.regras.trim(),
+      preReserva: !!d.preReserva, sinalPct: +d.sinalPct, prazoPagamentoMin: Math.min(1440, Math.max(5, +d.prazoPagamentoMin || 30)), regras: d.regras.trim(),
       pixTipo: d.pixTipo, pixChave: d.pixChave.trim(), pixNome: d.pixNome.trim(), pixCidade: d.pixCidade.trim(),
       locadorNome: d.locadorNome.trim(), locadorCpf: soDigitos(d.locadorCpf), locadorEndereco: d.locadorEndereco.trim(),
       imovelEndereco: d.imovelEndereco.trim(), foro: d.foro.trim(), clausulas: d.clausulas.trim() || CLAUSULAS_PADRAO, assinatura
@@ -924,7 +938,7 @@ function renderConfig(el) {
     await db.set('publico', 'info', {
       nome: cfg.nome, whatsapp: cfg.whatsapp ? foneBR(cfg.whatsapp) : '',
       preco12: cfg.preco12, preco24: cfg.preco24, taxaLimpeza: cfg.taxaLimpeza, horaEntrada: cfg.horaEntrada, horarios: cfg.horarios,
-      preReserva: cfg.preReserva, sinalPct: cfg.sinalPct, regras: cfg.regras,
+      preReserva: cfg.preReserva, sinalPct: cfg.sinalPct, prazoPagamentoMin: cfg.prazoPagamentoMin, regras: cfg.regras,
       pix: cfg.pixChave ? { chave: cfg.pixChave, tipo: cfg.pixTipo, nome: cfg.pixNome, cidade: cfg.pixCidade } : null,
       // prévia do contrato para o cliente (sem o seu CPF completo e sem o seu endereço)
       contrato: { nomeEspaco: cfg.nome, locadorNome: cfg.locadorNome, locadorCpfMasc: cfg.locadorCpf ? cpfMascarado(cfg.locadorCpf) : '', imovelEndereco: cfg.imovelEndereco || cfg.locadorEndereco || '', foro: cfg.foro, clausulas: cfg.clausulas }
