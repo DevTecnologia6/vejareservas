@@ -281,6 +281,11 @@ table.tabela { width: 100%; border-collapse: collapse; font-size: 14px; }
 .horario-info { font-size: 13px; color: var(--cinza); margin-top: 4px; font-weight: 500; }
 .horario-info b { color: var(--ouro-esc); }
 
+.info-canc { display: block; margin-top: 6px; font-size: 13px; color: var(--verde); }
+.info-canc small { font-size: 13px; color: var(--cinza); }
+.info-canc.neg { color: var(--vermelho); }
+.info-canc .btn-link { color: var(--vermelho); font-size: 13px; }
+
 /* ---------- Modal ---------- */
 .modal-fundo { position: fixed; inset: 0; background: rgba(20, 15, 8, .55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; animation: aparecer .15s; }
 .modal { background: var(--branco); border-radius: 20px; width: 100%; max-width: 620px; max-height: 92vh; overflow-y: auto; box-shadow: 0 25px 70px rgba(0,0,0,.3); animation: subir .2s; }

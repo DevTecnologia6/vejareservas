@@ -247,27 +247,79 @@ function abrirCompletarPerfil(depois) {
   });
 }
 
+const fmtDataHora = (ms) => { const d = new Date(ms); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const ST_CANC = { pendente: 'Cancelamento solicitado — aguardando resposta', recusado: 'Pedido de cancelamento recusado', aceito: 'Cancelamento aceito' };
+
 async function abrirMinhas() {
   abrirModal('Minhas reservas', '<div class="vazio">Carregando…</div>');
   try {
-    const [sols, res] = await Promise.all([db.query('solicitacoes', 'uid', usuario.uid), db.query('reservas', 'clienteUid', usuario.uid)]);
+    const [sols, res, cancs] = await Promise.all([
+      db.query('solicitacoes', 'uid', usuario.uid),
+      db.query('reservas', 'clienteUid', usuario.uid),
+      db.query('cancelamentos', 'uid', usuario.uid).catch(() => [])
+    ]);
+    const cancPor = Object.fromEntries(cancs.map((c) => [c.id, c]));
     const itens = [
       ...sols.map((s) => ({ data: s.data, periodo: s.periodo, hora: s.horaEntrada, total: s.total, codigo: s.codigo, st: ST_SOL[s.status || 'aguardando'] })),
       ...res.map((r) => {
         const total = (+r.valor || 0) + (+r.taxaLimpeza || 0);
         const pago = (r.pagamentos || []).reduce((t, p) => t + +p.valor, 0);
-        return { data: r.data, periodo: r.periodo, hora: r.horaEntrada, total, pago, st: ST_RES[r.status] || [r.status, ''] };
+        return { id: r.id, reserva: r, data: r.data, periodo: r.periodo, hora: r.horaEntrada, total, pago, st: ST_RES[r.status] || [r.status, ''], prazo: r.prazoCancelamento, status: r.status, canc: cancPor[r.id] };
       })
     ].sort((a, b) => String(b.data).localeCompare(String(a.data)));
-    $('#modal-raiz .modal-corpo').innerHTML = itens.length ? `<div class="lista-res">${itens.map((i) => `
-      <div class="item-res" style="cursor:default">
+
+    const linhaCancel = (i) => {
+      if (!i.id || !['confirmada', 'pendente'].includes(i.status)) return i.canc?.status === 'aceito' ? `<small class="info-canc">${ST_CANC.aceito}</small>` : '';
+      if (i.canc) return `<small class="info-canc ${i.canc.status === 'recusado' ? 'neg' : ''}">${ST_CANC[i.canc.status] || ''}</small>`;
+      if (!i.prazo) return '';
+      if (Date.now() <= i.prazo) return `<div class="info-canc"><small>Você pode cancelar até <b>${fmtDataHora(i.prazo)}</b></small> <button class="btn-link" data-cancelar="${i.id}">Solicitar cancelamento</button></div>`;
+      return `<small class="info-canc neg">Prazo de cancelamento encerrado (${DIAS_CANC} dias após o pagamento)</small>`;
+    };
+
+    const corpo = $('#modal-raiz .modal-corpo');
+    corpo.innerHTML = itens.length ? `<div class="lista-res">${itens.map((i) => `
+      <div class="item-res" style="cursor:default;flex-wrap:wrap">
         <div class="meio"><b>${i.data ? br(i.data) : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · entrada ' + i.hora : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
         <div class="dir"><span class="selo ${i.st[1]}">${i.st[0]}</span><b>${fmt(i.total)}</b></div>
+        <div style="flex-basis:100%">${linhaCancel(i)}</div>
       </div>`).join('')}</div>` : '<div class="vazio">Você ainda não tem reservas.<br>Escolha um dia livre no calendário!</div>';
+    corpo.querySelectorAll('[data-cancelar]').forEach((b) => (b.onclick = () => abrirCancelamento(itens.find((i) => i.id === b.dataset.cancelar))));
   } catch (e) {
     console.error(e);
     $('#modal-raiz .modal-corpo').innerHTML = '<div class="vazio">Não foi possível carregar agora. Tente novamente.</div>';
   }
+}
+
+const DIAS_CANC = 7;
+function abrirCancelamento(i) {
+  abrirModal('Solicitar cancelamento', `
+    <p style="margin-bottom:10px">Reserva de <b>${br(i.data)}</b> (${i.periodo}).</p>
+    <p class="nota-seg" style="background:var(--laranja-bg);color:#7a4d05;margin-bottom:14px">${CADEADO}<span>O cancelamento só pode ser pedido até <b>${fmtDataHora(i.prazo)}</b> (${DIAS_CANC} dias após a confirmação do pagamento). O pedido é analisado pelo ${esc(info.nome)} e a resposta aparece aqui em Minhas reservas.</span></p>
+    <form id="form-canc" class="grade-form">
+      <label class="campo inteiro">Motivo (opcional)<textarea name="motivo" maxlength="300" placeholder="Conte o motivo do cancelamento"></textarea></label>
+      <div class="erro inteiro" id="canc-erro"></div>
+      <div class="modal-acoes inteiro" style="margin-top:0">
+        <button type="button" class="btn btn-claro" id="canc-voltar">Voltar</button>
+        <button class="btn btn-perigo">Confirmar pedido de cancelamento</button>
+      </div>
+    </form>`, (m) => {
+    $('#canc-voltar', m).onclick = abrirMinhas;
+    $('#form-canc', m).onsubmit = async (e) => {
+      e.preventDefault();
+      if (Date.now() > i.prazo) return ($('#canc-erro', m).textContent = 'O prazo de cancelamento já terminou.');
+      const btn = $('button.btn-perigo', m); btn.disabled = true; btn.textContent = 'Enviando…';
+      try {
+        await db.set('cancelamentos', i.id, {
+          uid: usuario.uid, reservaId: i.id, cliente: perfil?.nome || usuario.email, data: i.data,
+          motivo: new FormData(e.target).get('motivo').trim().slice(0, 300), status: 'pendente', criadoEm: new Date().toISOString()
+        });
+        abrirMinhas();
+      } catch (err) {
+        console.error(err); btn.disabled = false; btn.textContent = 'Tentar novamente';
+        $('#canc-erro', m).textContent = 'Não foi possível enviar o pedido. O prazo pode ter terminado; fale com a gente pelo WhatsApp.';
+      }
+    };
+  });
 }
 
 // ---------------------------------------------------------------- pré-reserva

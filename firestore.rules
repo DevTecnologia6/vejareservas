@@ -47,6 +47,22 @@ service cloud.firestore {
       allow update, delete: if isDono();
     }
 
+    // Pedidos de cancelamento: o cliente só consegue pedir para a PRÓPRIA reserva e DENTRO do prazo (7 dias após a confirmação)
+    match /cancelamentos/{rid} {
+      allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
+      allow update, delete: if isDono();
+      allow create: if isDono() || (
+        emailConfirmado()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.reservaId == rid
+        && request.resource.data.status == 'pendente'
+        && request.resource.data.keys().hasOnly(['uid','reservaId','cliente','data','motivo','status','criadoEm'])
+        && request.resource.data.motivo is string && request.resource.data.motivo.size() <= 300
+        && get(/databases/$(database)/documents/reservas/$(rid)).data.clienteUid == request.auth.uid
+        && request.time.toMillis() <= get(/databases/$(database)/documents/reservas/$(rid)).data.prazoCancelamento
+      );
+    }
+
     // Pré-reservas: cliente com e-mail confirmado cria em nome dele mesmo e lê só as dele
     match /solicitacoes/{id} {
       allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);

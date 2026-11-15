@@ -52,7 +52,15 @@ const STATUS = {
 const OCUPA = ['pendente', 'confirmada', 'concluida']; // status que bloqueiam a data no calendário
 const CATEGORIAS = ['Material de limpeza', 'Produtos de piscina', 'Água', 'Luz', 'Internet', 'Gás', 'Manutenção', 'Imprevistos / danos', 'Outros'];
 const FORMAS = ['Pix', 'Dinheiro', 'Cartão', 'Transferência'];
-const REGRAS_PADRAO = '• A limpeza pós-evento é opcional. Sem ela, o espaço deve ser devolvido limpo e organizado.\n• Em caso de desistência, o valor pago não é reembolsado: a reserva fica congelada como crédito para uma nova data, com prioridade.\n• A data só é garantida após a confirmação do pagamento do sinal.';
+const REGRAS_PADRAO = '• A limpeza pós-evento é opcional. Sem ela, o espaço deve ser devolvido limpo e organizado.\n• A data só é garantida após a confirmação do pagamento do sinal.\n• O cancelamento pode ser solicitado em até 7 dias após a confirmação do pagamento. Depois desse prazo não é possível cancelar a reserva.';
+const DIAS_CANCELAMENTO = 7;
+// Prazo para o cliente pedir cancelamento: 7 dias após a confirmação (ou até o início da locação, o que vier antes)
+function prazoCancelamento(r) {
+  let prazo = Date.now() + DIAS_CANCELAMENTO * 864e5;
+  if (r.data) { const inicio = new Date(`${r.data}T${r.horaEntrada || '00:00'}:00`).getTime(); if (inicio < prazo) prazo = inicio; }
+  return prazo;
+}
+const fmtDataHora = (ms) => { const d = new Date(ms); return `${br(toISO(d))} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const CONFIG_PADRAO = {
   nome: 'Espaço Veja', preco12: 770, preco24: 1000, taxaLimpeza: 75, horaEntrada: '09:00', horarios: '08:00, 09:00, 10:00, 12:00, 14:00', whatsapp: '',
   preReserva: true, sinalPct: 50, regras: REGRAS_PADRAO,
@@ -63,7 +71,7 @@ const selo = (s) => `<span class="selo st-${s}">${STATUS[s]?.label || s}</span>`
 
 // ---------------------------------------------------------------- estado
 const state = {
-  reservas: [], despesas: [], solicitacoes: [], config: { ...CONFIG_PADRAO },
+  reservas: [], despesas: [], solicitacoes: [], cancelamentos: [], config: { ...CONFIG_PADRAO },
   mesInicio: new Date(), mesFin: new Date(), mesDesp: new Date(),
   filtroStatus: 'ativas', busca: ''
 };
@@ -75,7 +83,8 @@ function calc(r) {
 }
 
 async function carregar() {
-  const [reservas, despesas, cfg, sols] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes')]);
+  const [reservas, despesas, cfg, sols, canc] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes'), db.list('cancelamentos')]);
+  state.cancelamentos = canc.filter((x) => x.status === 'pendente');
   state.reservas = reservas;
   state.solicitacoes = sols.filter((x) => x.status !== 'recusada').sort((a, b) => String(a.data).localeCompare(String(b.data)));
   state.despesas = despesas;
@@ -111,7 +120,7 @@ function montarMenus() {
 }
 
 function atualizarBadge() {
-  const n = state.solicitacoes.length;
+  const n = state.solicitacoes.length + state.cancelamentos.length;
   $$('[data-pag="inicio"]').forEach((a) => {
     a.querySelector('.badge')?.remove();
     if (n) a.insertAdjacentHTML('beforeend', `<span class="badge">${n}</span>`);
@@ -137,7 +146,7 @@ function renderInicio(el) {
   const aReceber = state.reservas.filter((r) => ['pendente', 'confirmada'].includes(r.status) && r.data >= hoje()).reduce((s, r) => s + calc(r).falta, 0);
   const proximas = state.reservas.filter((r) => ['pendente', 'confirmada'].includes(r.status) && r.data >= hoje()).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 5);
 
-  el.innerHTML = blocoSolicitacoes() + `
+  el.innerHTML = blocoCancelamentos() + blocoSolicitacoes() + `
     <div class="banner" style="background-image:url('assets/banner.jpg')">
       <img src="assets/logo.png" class="logo-img banner-logo" alt="">
       <div><div class="titulo">${esc(state.config.nome)}</div><div class="lema">Conforto &amp; Lazer</div></div>
@@ -185,7 +194,7 @@ function renderInicio(el) {
   $('#cal-hoje').onclick = () => { state.mesInicio = new Date(); desenhar(); };
   desenhar();
   ligarItens(el);
-  ligarSolicitacoes(el);
+  ligarSolicitacoes(el); ligarCancelamentos(el);
 }
 
 function blocoSolicitacoes() {
@@ -202,6 +211,44 @@ function blocoSolicitacoes() {
           <button class="btn btn-perigo btn-peq" data-recusar="${x.id}">Recusar</button>
           <button class="btn btn-ouro btn-peq" data-aprovar="${x.id}">Aprovar</button></div></div>
       </div>`).join('')}</div></div>`;
+}
+
+function blocoCancelamentos() {
+  if (!state.cancelamentos.length) return '';
+  return `<div class="card solic" style="border-color:#efc2bd;background:linear-gradient(180deg,#fff6f5,#fff)">
+    <div class="card-topo"><div><h3>Pedidos de cancelamento</h3><small style="color:var(--cinza)">Feitos pelo cliente dentro do prazo de ${DIAS_CANCELAMENTO} dias.</small></div><span class="badge" style="margin:0;font-size:13px;padding:3px 10px">${state.cancelamentos.length}</span></div>
+    <div class="lista-res">${state.cancelamentos.map((x) => {
+      const r = state.reservas.find((y) => y.id === x.id);
+      const c = r ? calc(r) : null;
+      return `<div class="item-res">
+        <div class="ico" style="background:var(--vermelho-bg);color:var(--vermelho)">${ICO.cal}</div>
+        <div class="meio"><b>${esc(x.cliente || r?.cliente || 'Cliente')}</b><small>${br(x.data || r?.data)} · pedido em ${br(String(x.criadoEm).slice(0, 10))}${c ? ` · já pago ${fmt(c.recebido)}` : ''}</small>
+          ${x.motivo ? `<small style="display:block">Motivo: ${esc(x.motivo)}</small>` : ''}</div>
+        <div class="dir"><div class="acoes">
+          ${r ? `<button class="btn btn-claro btn-peq" data-vercanc="${x.id}">Ver reserva</button>` : ''}
+          <button class="btn btn-claro btn-peq" data-recusarcanc="${x.id}">Recusar</button>
+          <button class="btn btn-perigo btn-peq" data-aceitarcanc="${x.id}">Aceitar cancelamento</button></div></div>
+      </div>`;
+    }).join('')}</div></div>`;
+}
+
+function ligarCancelamentos(el) {
+  $$('[data-vercanc]', el).forEach((b) => (b.onclick = () => abrirDetalhe(b.dataset.vercanc)));
+  $$('[data-recusarcanc]', el).forEach((b) => (b.onclick = async () => {
+    if (!confirm('Recusar este pedido de cancelamento? A reserva continua valendo.')) return;
+    await db.update('cancelamentos', b.dataset.recusarcanc, { status: 'recusado' });
+    state.cancelamentos = state.cancelamentos.filter((x) => x.id !== b.dataset.recusarcanc);
+    toast('Pedido recusado.'); rerender();
+  }));
+  $$('[data-aceitarcanc]', el).forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.aceitarcanc;
+    const r = state.reservas.find((y) => y.id === id);
+    if (!confirm('Aceitar o cancelamento? A reserva será marcada como cancelada e a data volta a ficar livre. Se houver reembolso, faça pelo seu banco.')) return;
+    if (r) { await db.update('reservas', id, { status: 'cancelada' }); r.status = 'cancelada'; await sincronizarOcupacao(r.data); }
+    await db.update('cancelamentos', id, { status: 'aceito' });
+    state.cancelamentos = state.cancelamentos.filter((x) => x.id !== id);
+    toast('Reserva cancelada.'); rerender();
+  }));
 }
 
 function ligarSolicitacoes(el) {
@@ -237,7 +284,7 @@ const ligarItens = (el) => $$('.item-res', el).forEach((i) => (i.onclick = () =>
 // ---------------------------------------------------------------- RESERVAS
 function renderReservas(el) {
   const filtros = { ativas: 'Próximas', todas: 'Todas', pendente: 'Pendentes', confirmada: 'Confirmadas', congelada: 'Congeladas', concluida: 'Concluídas', cancelada: 'Canceladas' };
-  el.innerHTML = blocoSolicitacoes() + `
+  el.innerHTML = blocoCancelamentos() + blocoSolicitacoes() + `
     <div class="card">
       <div class="filtros"><input id="busca" placeholder="Buscar por cliente, telefone ou evento…" value="${esc(state.busca)}"></div>
       <div class="chips" style="margin-bottom:10px">${Object.entries(filtros).map(([k, v]) => `<button class="chip ${state.filtroStatus === k ? 'ativo' : ''}" data-f="${k}">${v}</button>`).join('')}</div>
@@ -255,7 +302,7 @@ function renderReservas(el) {
     $('#lista').innerHTML = lista.length ? lista.map(itemReserva).join('') : '<div class="vazio">Nenhuma reserva encontrada.</div>';
     ligarItens($('#lista'));
   };
-  ligarSolicitacoes(el);
+  ligarSolicitacoes(el); ligarCancelamentos(el);
   $('#busca').oninput = (e) => { state.busca = e.target.value; desenhar(); };
   $$('.chip', el).forEach((c) => (c.onclick = () => { state.filtroStatus = c.dataset.f; $$('.chip', el).forEach((x) => x.classList.toggle('ativo', x === c)); desenhar(); }));
   desenhar();
@@ -348,6 +395,7 @@ function abrirFormReserva(r = {}) {
           dados.pagamentos = +d.sinal > 0 ? [{ valor: +d.sinal, data: hoje(), forma: d.formaSinal }] : [];
           dados.criadoEm = `${hoje()}T${new Date().toTimeString().slice(0, 8)}`;
           if (r._clienteUid) { dados.clienteUid = r._clienteUid; dados.clienteEmail = r._clienteEmail || ''; }
+          if (dados.status === 'confirmada') dados.prazoCancelamento = prazoCancelamento(dados);
           const id = await db.add('reservas', dados);
           state.reservas.push({ id, ...dados });
           if (r._sol) {
@@ -355,6 +403,7 @@ function abrirFormReserva(r = {}) {
             state.solicitacoes = state.solicitacoes.filter((s) => s.id !== r._sol);
           }
         } else {
+          if (dados.status === 'confirmada' && !r.prazoCancelamento) dados.prazoCancelamento = prazoCancelamento(dados);
           await db.update('reservas', r.id, dados);
           Object.assign(state.reservas.find((x) => x.id === r.id), dados);
         }
@@ -387,6 +436,7 @@ function abrirDetalhe(id) {
       <div><small>Data</small><b>${br(r.data)}</b></div>
       <div><small>Período</small><b>${r.periodo} · entrada ${r.horaEntrada || '—'}</b></div>
       <div><small>Saída prevista</small><b>${saida || '—'}</b></div>
+      ${r.prazoCancelamento ? `<div><small>Cliente pode cancelar até</small><b class="${Date.now() > r.prazoCancelamento ? 'negativo' : ''}">${fmtDataHora(r.prazoCancelamento)}${Date.now() > r.prazoCancelamento ? ' (encerrado)' : ''}</b></div>` : ''}
       <div><small>Evento</small><b>${esc(r.evento || '—')}</b></div>
       <div><small>Telefone</small><b>${foneFmt(r.telefone)}</b></div>
       ${r.clienteEmail ? `<div><small>Conta do cliente</small><b>${esc(r.clienteEmail)}</b></div>` : ''}
@@ -447,6 +497,7 @@ function abrirPagamento(r) {
       const pagamentos = [...(r.pagamentos || []), { valor: +d.valor, data: d.data, forma: d.forma }];
       const upd = { pagamentos };
       if (d.confirmar && r.status === 'pendente') upd.status = 'confirmada';
+      if ((upd.status || r.status) === 'confirmada' && !r.prazoCancelamento) upd.prazoCancelamento = prazoCancelamento(r);
       await db.update('reservas', r.id, upd);
       Object.assign(r, upd);
       await sincronizarOcupacao(r.data);

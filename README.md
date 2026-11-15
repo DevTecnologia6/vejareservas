@@ -83,6 +83,13 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 
 > O sistema **não confirma o Pix sozinho** (isso exigiria a API paga de um banco). Por isso a pré-reserva fica *em negociação* até você conferir o comprovante e aprovar. O cliente continua podendo só conversar pelo WhatsApp, se preferir.
 
+## 5.0 Cancelamento (prazo de 7 dias)
+
+- Quando a reserva fica **Confirmada** (pagamento recebido), o sistema grava o prazo: **7 dias** a partir desse momento (ou até o início da locação, se for antes).
+- Dentro do prazo, o cliente vê em *Minhas reservas* o botão **Solicitar cancelamento** (com motivo). O pedido aparece no topo do seu painel em **Pedidos de cancelamento** → *Aceitar* (a reserva vira Cancelada e a data é liberada) ou *Recusar*.
+- Depois do prazo o botão some e aparece "Prazo de cancelamento encerrado". As regras do Firestore também bloqueiam pedidos fora do prazo.
+- Reembolso, quando houver, é feito por você pelo banco. O prazo aparece no detalhe de cada reserva no painel.
+
 ## 5.1 Horários e fotos
 
 - **Horário de entrada**: em *Ajustes*, defina os horários que o cliente pode escolher (ex.: `08:00, 09:00, 10:00, 12:00, 14:00`). Na pré-reserva ele escolhe um deles e o sistema mostra a **saída prevista** (12h ou 24h depois). No painel você pode digitar qualquer horário ao cadastrar ou editar.
