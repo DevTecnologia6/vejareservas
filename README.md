@@ -99,6 +99,16 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - Reservas cadastradas por você mesmo também geram contrato: preencha CPF e endereço do cliente no formulário.
 - Para validade jurídica ainda maior, você pode assinar o PDF gratuitamente pelo **assinador do gov.br**.
 
+## 5.0.4 Segurança e publicação automática das regras
+
+- **Regras do Firestore publicadas sozinhas:** toda alteração no `firestore.rules` é publicada pelo GitHub Actions (*Publicar regras do Firestore*), usando o secret `FIREBASE_SERVICE_ACCOUNT`. Não precisa mais copiar e colar no console. Se houver erro, o Firebase recusa e nada muda.
+- **Admin com e-mail confirmado:** o painel só abre depois que o e-mail do dono for confirmado (uma vez, pelo botão no próprio painel).
+- **Preços conferidos no servidor:** o cliente não consegue alterar valor, limpeza ou sinal da pré-reserva.
+- **Datas presas à pré-reserva:** só dá para segurar as datas da própria pré-reserva, com o prazo de pagamento configurado.
+- **Reserva simultânea:** se duas pessoas tentam a mesma data ao mesmo tempo, a segunda recebe o aviso e nada é cobrado.
+- **CSP:** o navegador só executa scripts do próprio site e do Firebase.
+- **Checklist do sistema:** em *Ajustes* (e aviso no *Início*) mostra o que falta configurar.
+
 ## 5.0.3 Prazo de 30 minutos para pagar
 
 - Ao enviar a pré-reserva o cliente vê o QR Code do Pix e uma **contagem regressiva de 30 minutos** (ajustável em *Ajustes → Tempo para o cliente pagar*).
