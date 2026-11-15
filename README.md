@@ -6,8 +6,8 @@ Sistema de reservas do **Espaço Veja**: cadastro de locações, calendário pú
 
 ```
 vejareservas/
-├── index.html               ← painel do dono (login)
-├── calendario.html          ← calendário público para os clientes
+├── index.html               ← site do CLIENTE (espacoveja.com.br) — conta, calendário, fotos, pré-reserva
+├── painel.html              ← painel do DONO (espacoveja.com.br/painel.html)
 ├── css/style.css
 ├── js/
 │   ├── firebase-config.js   ← COLE AQUI a configuração do Firebase
@@ -31,7 +31,7 @@ vejareservas/
 2. Clique em **uploading an existing file** e arraste **todo o conteúdo** da pasta `vejareservas` (inclusive a pasta `.github`) → **Commit changes**.
    > Se a pasta `.github` não subir arrastando, crie pelo GitHub: **Add file → Create new file**, digite `.github/workflows/lembrete.yml` como nome e cole o conteúdo do arquivo.
 3. Vá em **Settings → Pages** → *Source*: **Deploy from a branch** → Branch **main** / **(root)** → **Save**.
-4. Em 1–2 minutos o site fica em `https://SEU-USUARIO.github.io/vejareservas/`.
+4. Em 1–2 minutos o site fica no ar (no seu caso, em `devtecnologia.app.br/vejareservas/`).
 
 Nesse ponto ele já funciona em **modo demonstração** (com dados de exemplo salvos só no seu navegador) — dá para testar tudo antes de ligar o Firebase.
 
@@ -50,14 +50,24 @@ Nesse ponto ele já funciona em **modo demonstração** (com dados de exemplo sa
 2. Vá em **Ajustes**, ajuste os preços (vêm com 12h R$ 770 · 24h R$ 1.000 · limpeza R$ 75), preencha o **WhatsApp**, a **chave Pix** e clique em **Salvar configurações**. ⚠ Esse passo é obrigatório: é ele que publica preços, WhatsApp e Pix para o calendário público.
 3. Copie o **link do calendário público** e coloque na bio do Instagram / status do WhatsApp.
 
-## 4. Usar o seu domínio (opcional)
+## 4. Domínio: espacoveja.devtecnologia.app.br
 
-1. No painel do seu domínio (Registro.br, Hostinger etc.), crie um registro **CNAME**:
-   `reservas` → `SEU-USUARIO.github.io`
-2. No GitHub: **Settings → Pages → Custom domain** → `reservas.seudominio.com.br` → **Save** → marque **Enforce HTTPS** quando liberar.
-3. Lembre de adicionar esse domínio nos *Domínios autorizados* do Firebase (passo 2.6).
+1. Em registro.br → *devtecnologia.app.br* → **DNS → Editar zona** → **Nova entrada**:
 
-Links finais: painel `https://reservas.seudominio.com.br/` · calendário `https://reservas.seudominio.com.br/calendario.html`
+| Tipo | Nome | Dados |
+|---|---|---|
+| CNAME | `espacoveja` | `devtecnologia6.github.io` |
+
+   (Não mexa nas entradas que já existem do site da Dev Tecnologia.)
+2. No GitHub: repositório *vejareservas* → **Settings → Pages → Custom domain** → `espacoveja.devtecnologia.app.br` → **Save**. Quando aparecer *DNS check successful*, marque **Enforce HTTPS**.
+3. No Firebase: **Authentication → Configurações → Domínios autorizados** → adicione `espacoveja.devtecnologia.app.br`.
+4. `js/firebase-config.js` já vem com `dominioOficial = "espacoveja.devtecnologia.app.br"`.
+
+Links finais:
+- **Clientes:** `https://espacoveja.devtecnologia.app.br`
+- **Seu painel:** `https://espacoveja.devtecnologia.app.br/painel.html` (não divulgue; salve nos favoritos)
+
+> **Quando comprar o espacoveja.com.br:** troque o `dominioOficial` no `firebase-config.js`, troque o *Custom domain* no GitHub, crie no DNS do domínio novo 4 entradas **A** (`185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`) + **CNAME** `www` → `devtecnologia6.github.io`, e adicione o domínio novo no Firebase.
 
 ## 5. Pix e pré-reserva pelo site
 
@@ -85,7 +95,7 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 
 | | Proprietário (você) | Cliente |
 |---|---|---|
-| Onde entra | `index.html` (painel) | `calendario.html`: abre direto na tela de **Entrar / Criar conta** |
+| Onde entra | `painel.html` | `espacoveja.com.br` (index.html): abre direto na tela de **Entrar / Criar conta** |
 | Como é criada | Só por você, no console do Firebase (Authentication → Adicionar usuário) | O próprio cliente cria com **nome, WhatsApp, e-mail e senha** |
 | Confirmação | — | **Link no e-mail**, obrigatório para ver qualquer coisa: calendário, fotos e pré-reserva |
 | O que pode ver | Tudo | Só as próprias reservas, em *Minhas reservas* |

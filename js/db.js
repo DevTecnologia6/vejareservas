@@ -4,7 +4,7 @@
 //  usa o localStorage do navegador (modo demonstração).
 // =====================================================================
 import { firebaseConfig } from './firebase-config.js';
-export { dominioOficial } from './firebase-config.js';
+export { dominioOficial, dominiosPermitidos } from './firebase-config.js';
 
 const FB_VERSION = '10.12.2';
 const CDN = `https://www.gstatic.com/firebasejs/${FB_VERSION}`;

@@ -45,7 +45,7 @@ const verFotos = (i) => abrirVisualizador(fotos, i, async (id) => (await db.get(
 
 // ---------------------------------------------------------------- site oficial
 const host = location.hostname;
-const siteOficial = !db.dominioOficial || [db.dominioOficial, 'www.' + db.dominioOficial, 'localhost', '127.0.0.1'].includes(host);
+const siteOficial = !db.dominioOficial || [db.dominioOficial, 'www.' + db.dominioOficial, ...(db.dominiosPermitidos || []), 'localhost', '127.0.0.1'].includes(host);
 
 function montarAlertaFalso() {
   if (siteOficial) return;

@@ -590,7 +590,7 @@ async function renderFotos(el) {
     el.innerHTML = `
       <div class="card">
         <div class="card-topo"><div><h3>Fotos que aparecem no calendário público</h3><small style="color:var(--cinza)">${fotos.length} de ${MAX_FOTOS} fotos · a primeira é a capa da galeria</small></div>
-          <a class="btn btn-claro btn-peq" href="calendario.html" target="_blank" rel="noopener">Ver como o cliente vê ${ICO.dir}</a></div>
+          <a class="btn btn-claro btn-peq" href="./" target="_blank" rel="noopener">Ver como o cliente vê ${ICO.dir}</a></div>
         <label class="upload-zona">${ICO.foto.replace('<svg', '<svg width="30" height="30" style="display:block;margin:0 auto 6px;color:var(--ouro)"')}
           <b>Toque para adicionar fotos</b><br>Pode escolher várias de uma vez · elas são otimizadas automaticamente
           <input type="file" id="up-fotos" accept="image/*" multiple hidden></label>
@@ -651,7 +651,7 @@ async function renderFotos(el) {
 // ---------------------------------------------------------------- CONFIG
 function renderConfig(el) {
   const c = state.config;
-  const linkPublico = new URL('calendario.html', location.href).href.split('#')[0];
+  const linkPublico = new URL('./', location.href).href.split('#')[0];
   const tipos = { celular: 'Celular', cpf: 'CPF / CNPJ', email: 'E-mail', aleatoria: 'Chave aleatória' };
   el.innerHTML = `
     <form id="form-cfg">
@@ -775,7 +775,7 @@ async function iniciar() {
       $('#tela-app').classList.remove('oculto');
       const negado = /permission|insufficient/i.test(err.code || err.message);
       $('#conteudo').innerHTML = negado
-        ? `<div class="card"><h3>🔒 Acesso restrito</h3><p style="margin-top:8px;color:var(--cinza)">A conta <b>${esc(user.email)}</b> não tem permissão para acessar o painel do proprietário.<br><br>Se você é cliente, use o <a href="calendario.html">calendário de reservas</a>. Se você é o dono, confira se este e-mail está nas regras do Firestore (veja o README).</p><button class="btn btn-claro" style="margin-top:14px" onclick="document.getElementById('btn-sair').click()">Sair desta conta</button></div>`
+        ? `<div class="card"><h3>🔒 Acesso restrito</h3><p style="margin-top:8px;color:var(--cinza)">A conta <b>${esc(user.email)}</b> não tem permissão para acessar o painel do proprietário.<br><br>Se você é cliente, use o <a href="./">site de reservas</a>. Se você é o dono, confira se este e-mail está nas regras do Firestore (veja o README).</p><button class="btn btn-claro" style="margin-top:14px" onclick="document.getElementById('btn-sair').click()">Sair desta conta</button></div>`
         : `<div class="card"><h3>Não foi possível carregar os dados</h3><p style="margin-top:8px;color:var(--cinza)">${esc(err.message)}</p></div>`;
       return;
     }
