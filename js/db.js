@@ -35,17 +35,17 @@ export async function onAuth(cb) {
   if (modoDemo) {
     const u = localStorage.getItem(LS + 'sessao');
     demoListeners.add(cb);
-    cb(u ? { email: u } : null);
+    cb(u ? { email: u, emailVerified: true } : null);
     return;
   }
   await initFirebase();
-  au.onAuthStateChanged(fauth, (u) => cb(u ? { email: u.email, uid: u.uid } : null));
+  au.onAuthStateChanged(fauth, (u) => cb(u ? { email: u.email, uid: u.uid, emailVerified: u.emailVerified } : null));
 }
 
 export async function login(email, senha) {
   if (modoDemo) {
     localStorage.setItem(LS + 'sessao', email || 'demo@vejareservas');
-    demoListeners.forEach((cb) => cb({ email }));
+    demoListeners.forEach((cb) => cb({ email, emailVerified: true }));
     return;
   }
   await initFirebase();

@@ -373,3 +373,19 @@ table.tabela { width: 100%; border-collapse: collapse; font-size: 14px; }
 .prazo-pag #prazo-tempo { font-size: 18px; font-variant-numeric: tabular-nums; }
 .prazo-pag.ok { background: var(--verde-bg); color: var(--verde); }
 .prazo-pag.esgotado { background: var(--vermelho-bg); color: var(--vermelho); }
+
+.checklist .chk-item { display: flex; align-items: center; gap: 14px; padding: 11px 4px; border-bottom: 1px solid var(--linha); }
+.checklist .chk-item:last-of-type { border-bottom: none; }
+.checklist .chk-item > span { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; font-size: 14px; }
+.checklist .chk-item.ok > span { background: var(--verde-bg); color: var(--verde); }
+.checklist .chk-item.pend > span { background: var(--laranja-bg); color: var(--laranja); }
+.checklist .chk-item div { flex: 1; min-width: 0; }
+.checklist .chk-item b { display: block; font-size: 14.5px; }
+.checklist .chk-item small { color: var(--cinza); font-size: 12.5px; }
+
+.solic .acoes { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .solic .item-res .dir { flex-basis: 100%; text-align: left; }
+  .solic .acoes { justify-content: flex-start; }
+  .nav-mobile a span { font-size: 10px; }
+}
