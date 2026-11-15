@@ -5,7 +5,7 @@ service cloud.firestore {
     // ⚠ TROQUE pelo(s) e-mail(s) do PROPRIETÁRIO (quem acessa o painel)
     function isDono() {
       return request.auth != null
-        && request.auth.token.email in ['SEU-EMAIL@gmail.com'];
+        && request.auth.token.email in ['devtecnologia6@gmail.com'];
     }
     function logado()          { return request.auth != null; }
     function emailConfirmado() { return logado() && request.auth.token.email_verified == true; }
