@@ -20,6 +20,14 @@ const db = admin.firestore();
 
 const fmt = (v) => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const br = (iso) => iso.split('-').reverse().join('/');
+function saidaTxt(r) {
+  if (!r.data || !r.horaEntrada) return '';
+  const [h, m] = r.horaEntrada.split(':').map(Number);
+  const d = new Date(`${r.data}T00:00:00Z`);
+  d.setUTCHours(h + ((+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24), m);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)} às ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
 const fone = (s) => { const d = String(s || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d || 'não informado'; };
 
 // "amanhã" no fuso de Brasília
@@ -35,6 +43,14 @@ async function enviarWhatsApp(texto) {
   if (!r.ok || /apikey is invalid|invalid apikey|error/i.test(corpo)) {
     throw new Error(`CallMeBot respondeu ${r.status}: ${corpo.replace(/<[^>]+>/g, ' ').slice(0, 300)}`);
   }
+}
+
+// Contas de clientes excluídas pelo dono no painel: apaga o login (e-mail/senha) de vez
+for (const d of (await db.collection('bloqueados').where('excluirLogin', '==', true).get()).docs) {
+  if (d.data().loginExcluidoEm) continue;
+  try { await admin.auth().deleteUser(d.id); console.log(`🗑 Login excluído: ${d.data().email || d.id}`); }
+  catch (e) { if (e.code !== 'auth/user-not-found') { console.error('Erro ao excluir login', d.id, e.message); continue; } }
+  await d.ref.update({ loginExcluidoEm: new Date().toISOString() });
 }
 
 const cfgDoc = await db.doc('config/geral').get();
@@ -68,7 +84,8 @@ for (const r of reservas) {
     `👤 *Cliente:* ${r.cliente}`,
     `📞 *Telefone:* ${fone(r.telefone)}`,
     `🎉 *Evento:* ${r.evento || '—'}`,
-    `🕘 *Data:* ${br(r.data)} • ${r.periodo} • entrada ${r.horaEntrada || '—'}`,
+    `🕘 *Entrada:* ${br(r.data)} às ${r.horaEntrada || '—'} • ${(+r.dias || 1) > 1 ? `${r.dias} diárias` : r.periodo}`,
+    saidaTxt(r) ? `🚪 *Saída prevista:* ${saidaTxt(r)}` : null,
     `💰 *Total:* ${fmt(total)} | recebido ${fmt(recebido)}`,
     falta > 0 ? `⚠️ *Falta receber:* ${fmt(falta)}` : `✅ *Pagamento completo*`,
     r.status === 'pendente' ? `❗ Reserva ainda está como *PENDENTE*` : null,
