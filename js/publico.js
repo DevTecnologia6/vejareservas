@@ -157,7 +157,9 @@ function abrirAcesso(titulo, corpo, aoMontar) {
 // ---------------------------------------------------------------- conta do cliente
 const ERROS = {
   'auth/email-already-in-use': 'Este e-mail já tem conta. Use "Entrar".',
-  'auth/invalid-credential': 'E-mail ou senha incorretos.',
+  'auth/invalid-credential': 'E-mail ou senha incorretos. Toque no 👁 para conferir a senha ou use "Esqueci minha senha".',
+  'auth/network-request-failed': 'Sem conexão com a internet. Verifique e tente de novo.',
+  'auth/user-disabled': 'Esta conta foi desativada.',
   'auth/wrong-password': 'E-mail ou senha incorretos.',
   'auth/user-not-found': 'E-mail ou senha incorretos.',
   'auth/invalid-email': 'E-mail inválido.',
@@ -165,7 +167,18 @@ const ERROS = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente de novo.',
   'auth/unauthorized-domain': 'Este endereço não está autorizado. Use o site oficial.'
 };
-const msgErro = (e) => ERROS[e?.code] || 'Algo deu errado. Tente novamente.';
+const msgErro = (e) => ERROS[e?.code] || ('Algo deu errado. Tente novamente.' + (e?.code ? ` (${e.code})` : ''));
+// botão 👁 para ver a senha digitada (evita erro de digitação no celular)
+function olhoSenha(raiz) {
+  raiz.querySelectorAll('input[type=password]').forEach((inp) => {
+    if (inp.dataset.olho) return; inp.dataset.olho = '1';
+    const caixa = document.createElement('span'); caixa.className = 'senha-caixa';
+    inp.parentNode.insertBefore(caixa, inp); caixa.appendChild(inp);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'senha-olho'; b.textContent = '👁'; b.title = 'Mostrar senha';
+    b.onclick = () => { const ver = inp.type === 'password'; inp.type = ver ? 'text' : 'password'; b.textContent = ver ? '🙈' : '👁'; };
+    caixa.appendChild(b);
+  });
+}
 
 async function carregarPerfil() {
   if (!usuario) { perfil = null; return; }
@@ -182,7 +195,7 @@ function atualizarBarraConta() {
     <button class="btn btn-claro btn-peq" id="btn-minhas">Minhas reservas</button>
     <button class="btn-link" id="btn-sair-cli">Sair</button>`;
   $('#btn-minhas').onclick = () => (usuario.emailVerified ? abrirMinhas() : abrirConfirmarEmail());
-  $('#btn-sair-cli').onclick = async () => { await db.clienteSair(); };
+  $('#btn-sair-cli').onclick = async () => { await db.clienteSair(); location.reload(); };
 }
 
 function abrirConta(aba = 'cadastro', depois) {
@@ -196,8 +209,9 @@ function abrirConta(aba = 'cadastro', depois) {
     <form id="form-conta" class="grade-form">
       ${cad ? htmlDadosPessoais() + htmlEndereco() : ''}
       <label class="campo inteiro">E-mail${cad ? ' *' : ''}<input type="email" name="email" required autocomplete="email" placeholder="Ex.: maria@gmail.com"></label>
-      <label class="campo ${cad ? '' : 'inteiro'}">Senha${cad ? ' *' : ''}<input type="password" name="senha" required minlength="6" autocomplete="${cad ? 'new-password' : 'current-password'}" placeholder="${cad ? 'Mínimo 6 caracteres' : 'Sua senha'}"></label>
-      ${cad ? `<label class="campo">Confirmar senha *<input type="password" name="senha2" required minlength="6" autocomplete="new-password" placeholder="Digite a senha novamente"></label>
+      <label class="campo ${cad ? '' : 'inteiro'}">Senha${cad ? ' *' : ''}<input type="password" name="senha" required minlength="6" autocomplete="${cad ? 'off' : 'current-password'}" placeholder="${cad ? 'Mínimo 6 caracteres' : 'Sua senha'}"></label>
+      ${cad ? `<label class="campo">Confirmar senha *<input type="password" name="senha2" required minlength="6" autocomplete="off" placeholder="Digite a senha novamente"></label>
+      <p class="inteiro" style="font-size:12.5px;color:var(--cinza);line-height:1.45">🔑 <b>Anote a sua senha:</b> você vai usá-la para entrar em outros aparelhos. Se o celular sugerir uma "senha forte" automática, prefira criar a sua.</p>
       <p class="inteiro" style="font-size:12px;color:var(--cinza)">* Todos os campos são obrigatórios.</p>` : ''}
       <div class="erro inteiro" id="conta-erro"></div>
       <button class="btn btn-ouro btn-bloco inteiro" type="submit">${cad ? 'Criar conta' : 'Entrar'}</button>
@@ -206,7 +220,7 @@ function abrirConta(aba = 'cadastro', depois) {
     </form>`, (m) => {
     m.querySelectorAll('[data-aba]').forEach((b) => (b.onclick = () => abrirConta(b.dataset.aba, depois)));
     const f = $('#form-conta', m);
-    ligarCampos(f);
+    ligarCampos(f); olhoSenha(f);
     $('#esqueci', m)?.addEventListener('click', async () => {
       if (!f.email.value) return ($('#conta-erro', m).textContent = 'Digite seu e-mail acima primeiro.');
       try { await db.recuperarSenha(f.email.value.trim()); $('#conta-erro', m).innerHTML = '<span style="color:var(--verde)">Enviamos um link para redefinir sua senha. Confira seu e-mail (e o spam).</span>'; }
@@ -594,7 +608,7 @@ function mostrarConfirmacao(sol, temPix, solId) {
 }
 
 // ---------------------------------------------------------------- início
-async function carregarApp() {
+async function carregarApp(tentativa = 1) {
   try {
     const [pub, ocup] = await Promise.all([db.get('publico', 'info'), db.list('ocupacao')]);
     if (pub) info = { ...info, ...pub };
@@ -605,7 +619,15 @@ async function carregarApp() {
     $('.pub-dica').textContent = info.preReserva ? 'Toque em um dia livre para reservar.' : 'Toque em um dia livre para pedir a reserva pelo WhatsApp.';
   } catch (e) {
     console.error(e);
-    $('#cal').innerHTML = '<div class="vazio">Não foi possível carregar as datas agora. Saia e entre novamente na sua conta ou tente em instantes.</div>';
+    // login guardado de antes da confirmação do e-mail: renova o acesso e tenta de novo
+    if (tentativa === 1 && !db.modoDemo) {
+      const ok = await db.clienteVerificarEmail().catch(() => true);
+      if (!ok) { usuario.emailVerified = false; return rotear(); }
+      return carregarApp(2);
+    }
+    $('#cal').innerHTML = `<div class="vazio">Não foi possível carregar as datas agora (${esc(e.code || 'erro')}).<br><br><button class="btn btn-ouro btn-peq" id="cal-tentar">Tentar de novo</button> <button class="btn btn-claro btn-peq" id="cal-sair">Sair da conta</button></div>`;
+    $('#cal-tentar').onclick = () => location.reload();
+    $('#cal-sair').onclick = async () => { await db.clienteSair(); location.reload(); };
     return;
   }
   montarSelo('#selo');

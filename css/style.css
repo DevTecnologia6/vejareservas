@@ -389,3 +389,8 @@ table.tabela { width: 100%; border-collapse: collapse; font-size: 14px; }
   .solic .acoes { justify-content: flex-start; }
   .nav-mobile a span { font-size: 10px; }
 }
+
+/* campo de senha com botão de ver */
+.senha-caixa { position: relative; display: block; }
+.senha-caixa input { width: 100%; padding-right: 46px; }
+.senha-olho { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: 0; font-size: 18px; cursor: pointer; padding: 6px; line-height: 1; }
