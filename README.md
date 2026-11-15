@@ -99,6 +99,12 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - Reservas cadastradas por você mesmo também geram contrato: preencha CPF e endereço do cliente no formulário.
 - Para validade jurídica ainda maior, você pode assinar o PDF gratuitamente pelo **assinador do gov.br**.
 
+## 5.0.3 Prazo de 30 minutos para pagar
+
+- Ao enviar a pré-reserva o cliente vê o QR Code do Pix e uma **contagem regressiva de 30 minutos** (ajustável em *Ajustes → Tempo para o cliente pagar*).
+- Ele paga e toca em **"Já paguei — enviar comprovante"**: abre o WhatsApp com a mensagem pronta e a data fica **segurada até você aprovar** (no painel aparece "💰 Cliente informou o pagamento").
+- Se não tocar a tempo, a pré-reserva **expira sozinha**: a data volta a aparecer livre no calendário na hora, e ao abrir o painel ela é marcada como expirada. O cliente vê "Expirada" em *Minhas reservas*.
+
 ## 5.0.2 Várias diárias, cadastro completo e clientes
 
 - **Várias datas seguidas:** no calendário o cliente toca no primeiro dia e depois no último (ex.: 18 → 21). O sistema reserva as 4 diárias (24h cada), calcula o valor (diárias × preço de 24h), mostra entrada e saída e ocupa todas as datas. No painel, use o campo **Quantidade de diárias**.

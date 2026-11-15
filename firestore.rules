@@ -50,12 +50,23 @@ service cloud.firestore {
     // Datas ocupadas: só clientes logados leem; e só podem MARCAR uma data livre como "pendente"
     match /ocupacao/{data} {
       allow read: if clienteOk();
+      // cliente segura a data para a PRÓPRIA pré-reserva (com prazo de pagamento)
       allow create: if isDono()
         || (clienteAtivo()
-            && request.resource.data.keys().hasOnly(['status'])
+            && data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && request.resource.data.keys().hasOnly(['status', 'expiraEm', 'sol'])
             && request.resource.data.status == 'pendente'
-            && data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'));
-      allow update, delete: if isDono();
+            && get(/databases/$(database)/documents/solicitacoes/$(request.resource.data.sol)).data.uid == request.auth.uid);
+      // atualizar: a própria pré-reserva (ex.: "Já paguei") ou ocupar uma data cujo prazo de pagamento expirou
+      allow update: if isDono()
+        || (clienteAtivo()
+            && request.resource.data.keys().hasOnly(['status', 'expiraEm', 'sol'])
+            && request.resource.data.status == 'pendente'
+            && get(/databases/$(database)/documents/solicitacoes/$(request.resource.data.sol)).data.uid == request.auth.uid
+            && resource.data.status == 'pendente'
+            && (get(/databases/$(database)/documents/solicitacoes/$(resource.data.sol)).data.uid == request.auth.uid
+                || resource.data.expiraEm < request.time.toMillis()));
+      allow delete: if isDono();
     }
 
     // Pedidos de cancelamento: o cliente só consegue pedir para a PRÓPRIA reserva e DENTRO do prazo (7 dias após a confirmação)
@@ -77,13 +88,23 @@ service cloud.firestore {
     // Pré-reservas: cliente com e-mail confirmado cria em nome dele mesmo e lê só as dele
     match /solicitacoes/{id} {
       allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
-      allow update, delete: if isDono();
+      allow delete: if isDono();
+      // cliente só pode marcar "Já paguei" na própria pré-reserva e dentro do prazo
+      allow update: if isDono() || (
+        clienteAtivo()
+        && resource.data.uid == request.auth.uid
+        && resource.data.status == 'aguardando'
+        && request.time.toMillis() <= resource.data.expiraEm
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pagoInformadoEm'])
+      );
       allow create: if isDono() || (
         clienteAtivo()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == 'aguardando'
-        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato'])
+        && request.resource.data.expiraEm is int
+        && request.resource.data.expiraEm <= request.time.toMillis() + 86400000
+        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','expiraEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato'])
         && request.resource.data.cliente is string && request.resource.data.cliente.size() >= 3 && request.resource.data.cliente.size() <= 80
         && request.resource.data.telefone is string && request.resource.data.telefone.size() == 11
         && request.resource.data.data is string && request.resource.data.data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')

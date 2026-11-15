@@ -63,7 +63,7 @@ console.log(`📅 Verificando ${br(amanha)} — ${reservas.length} locação(õe
 
 // Aviso de pré-reservas do site aguardando aprovação
 if (!DATA_TESTE) {
-  const sols = (await db.collection('solicitacoes').get()).docs.map((d) => d.data()).filter((s) => s.status !== 'recusada').sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  const sols = (await db.collection('solicitacoes').get()).docs.map((d) => d.data()).filter((s) => (!s.status || s.status === 'aguardando') && (s.pagoInformadoEm || !s.expiraEm || s.expiraEm > Date.now())).sort((a, b) => String(a.data).localeCompare(String(b.data)));
   if (sols.length) {
     const linhas = sols.slice(0, 10).map((s) => `• ${br(s.data)} — ${s.cliente} (${s.periodo}) · ${s.codigo}${s.sinal ? ` · sinal ${fmt(s.sinal)}` : ''}`);
     await enviarWhatsApp([`🔔 *${sols.length} pré-reserva(s) do site aguardando aprovação*`, '', ...linhas, '', 'Confira o Pix e aprove no painel do VejaReservas.'].join('\n'));
