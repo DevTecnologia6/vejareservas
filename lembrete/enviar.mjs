@@ -11,8 +11,8 @@ import admin from 'firebase-admin';
 
 const { FIREBASE_SERVICE_ACCOUNT, CALLMEBOT_PHONE, CALLMEBOT_APIKEY, DATA_TESTE } = process.env;
 if (!FIREBASE_SERVICE_ACCOUNT || !CALLMEBOT_PHONE || !CALLMEBOT_APIKEY) {
-  console.error('❌ Faltam secrets: FIREBASE_SERVICE_ACCOUNT, CALLMEBOT_PHONE e/ou CALLMEBOT_APIKEY.');
-  process.exit(1);
+  console.log('⏸ Lembrete ainda não configurado: faltam os secrets FIREBASE_SERVICE_ACCOUNT, CALLMEBOT_PHONE e/ou CALLMEBOT_APIKEY. Nada foi enviado.');
+  process.exit(0);
 }
 
 admin.initializeApp({ credential: admin.credential.cert(JSON.parse(FIREBASE_SERVICE_ACCOUNT)) });
