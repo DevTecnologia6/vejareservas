@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#a8782e">
+  <title>VejaReservas · Espaço Veja</title>
+  <link rel="icon" href="assets/logo.png">
+  <link rel="apple-touch-icon" href="assets/logo.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ============ LOGIN ============ -->
+  <section id="tela-login" class="oculto">
+    <div class="login-card">
+      <img src="assets/logo.png" class="logo-img" alt="Espaço Veja">
+      <h1>VejaReservas</h1>
+      <p class="sub">Espaço Veja · Painel</p>
+      <div id="aviso-demo" class="aviso-demo oculto">
+        <b>Modo demonstração.</b> O Firebase ainda não foi configurado — os dados ficam salvos só neste navegador. Entre com qualquer e-mail.
+      </div>
+      <form id="form-login">
+        <label class="campo">E-mail
+          <input type="email" id="login-email" required autocomplete="username">
+        </label>
+        <label class="campo">Senha
+          <input type="password" id="login-senha" autocomplete="current-password">
+        </label>
+        <div class="erro" id="login-erro"></div>
+        <button class="btn btn-ouro btn-bloco" type="submit">Entrar</button>
+        <button type="button" class="btn-link" id="esqueci-admin" style="justify-self:center">Esqueci minha senha</button>
+      </form>
+      <div class="login-seguro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg> Área restrita ao proprietário · conexão segura</div>
+    </div>
+  </section>
+
+  <!-- ============ APP ============ -->
+  <section id="tela-app" class="oculto">
+    <aside class="sidebar">
+      <div class="marca">
+        <img src="assets/logo.png" class="logo-img" alt="Espaço Veja">
+        <h2 id="nome-espaco">Espaço Veja</h2>
+        <span>Espaço para eventos</span>
+      </div>
+      <div class="menu-titulo">Menu principal</div>
+      <nav class="menu" id="menu"></nav>
+      <div class="rodape">
+        <div class="avatar">EV</div>
+        <div class="info"><b>Proprietário</b><small id="usuario-email"></small></div>
+        <button class="btn-sair" id="btn-sair" title="Sair">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <main>
+      <div id="faixa-demo" class="faixa-demo oculto">⚠ Modo demonstração — configure o Firebase em <code>js/firebase-config.js</code> para salvar os dados na nuvem.</div>
+      <div class="topo">
+        <div>
+          <div class="migalha"><b>VEJARESERVAS</b> / <span id="migalha-pagina">Espaço Veja</span></div>
+          <h1 id="titulo-pagina">Visão geral</h1>
+        </div>
+        <button class="btn btn-ouro" data-acao="nova-reserva">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="txt">Nova reserva</span>
+        </button>
+      </div>
+      <div id="conteudo"></div>
+    </main>
+
+    <nav class="nav-mobile" id="nav-mobile"></nav>
+  </section>
+
+  <div id="modal-raiz"></div>
+
+  <script src="js/vendor/qrcode.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

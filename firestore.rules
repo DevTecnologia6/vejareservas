@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ⚠ TROQUE pelo(s) e-mail(s) do PROPRIETÁRIO (quem acessa o painel)
+    function isDono() {
+      return request.auth != null
+        && request.auth.token.email in ['SEU-EMAIL@gmail.com'];
+    }
+    function logado()          { return request.auth != null; }
+    function emailConfirmado() { return logado() && request.auth.token.email_verified == true; }
+
+    // ---------- Dados privados do proprietário ----------
+    match /despesas/{id} { allow read, write: if isDono(); }
+    match /config/{id}   { allow read, write: if isDono(); }
+
+    // Reservas: só o dono escreve; o cliente pode LER apenas as reservas ligadas à conta dele
+    match /reservas/{id} {
+      allow write: if isDono();
+      allow read:  if isDono() || (logado() && resource.data.clienteUid == request.auth.uid);
+    }
+
+    // ---------- Contas de clientes ----------
+    match /clientes/{uid} {
+      allow read:   if isDono() || (logado() && request.auth.uid == uid);
+      allow create, update: if logado() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['nome','telefone','email','criadoEm'])
+        && request.resource.data.nome is string && request.resource.data.nome.size() >= 3 && request.resource.data.nome.size() <= 80
+        && request.resource.data.telefone is string && request.resource.data.telefone.size() >= 10 && request.resource.data.telefone.size() <= 11;
+      allow delete: if isDono();
+    }
+
+    // ---------- Área do cliente (só com conta e e-mail confirmado) ----------
+    function clienteOk() { return isDono() || emailConfirmado(); }
+    match /publico/{id}   { allow read: if clienteOk(); allow write: if isDono(); }
+    match /fotos/{id}     { allow read: if clienteOk(); allow write: if isDono(); }
+    match /fotosFull/{id} { allow read: if clienteOk(); allow write: if isDono(); }
+
+    // Datas ocupadas: só clientes logados leem; e só podem MARCAR uma data livre como "pendente"
+    match /ocupacao/{data} {
+      allow read: if clienteOk();
+      allow create: if isDono()
+        || (emailConfirmado()
+            && request.resource.data.keys().hasOnly(['status'])
+            && request.resource.data.status == 'pendente'
+            && data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'));
+      allow update, delete: if isDono();
+    }
+
+    // Pré-reservas: cliente com e-mail confirmado cria em nome dele mesmo e lê só as dele
+    match /solicitacoes/{id} {
+      allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
+      allow update, delete: if isDono();
+      allow create: if isDono() || (
+        emailConfirmado()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.status == 'aguardando'
+        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','aceitouRegras'])
+        && request.resource.data.cliente is string && request.resource.data.cliente.size() >= 3 && request.resource.data.cliente.size() <= 80
+        && request.resource.data.telefone is string && request.resource.data.telefone.size() >= 10 && request.resource.data.telefone.size() <= 11
+        && request.resource.data.data is string && request.resource.data.data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.periodo in ['12h', '24h']
+        && request.resource.data.horaEntrada is string && request.resource.data.horaEntrada.matches('^[0-2][0-9]:[0-5][0-9]$')
+        && request.resource.data.evento is string && request.resource.data.evento.size() <= 60
+        && request.resource.data.obs is string && request.resource.data.obs.size() <= 400
+        && request.resource.data.codigo is string && request.resource.data.codigo.size() <= 12
+      );
+    }
+  }
+}

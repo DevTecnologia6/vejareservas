@@ -1,0 +1,199 @@
+// =====================================================================
+//  VejaReservas — camada de dados
+//  Usa o Firebase (Firestore + Auth) quando configurado; caso contrário
+//  usa o localStorage do navegador (modo demonstração).
+// =====================================================================
+import { firebaseConfig } from './firebase-config.js';
+export { dominioOficial } from './firebase-config.js';
+
+const FB_VERSION = '10.12.2';
+const CDN = `https://www.gstatic.com/firebasejs/${FB_VERSION}`;
+
+export const modoDemo = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('COLE_AQUI');
+
+let fs, au, fdb, fauth;
+
+async function initFirebase() {
+  if (fdb) return;
+  const appMod = await import(`${CDN}/firebase-app.js`);
+  fs = await import(`${CDN}/firebase-firestore.js`);
+  au = await import(`${CDN}/firebase-auth.js`);
+  const app = appMod.initializeApp(firebaseConfig);
+  fdb = fs.getFirestore(app);
+  fauth = au.getAuth(app);
+}
+
+// ---------------------------------------------------------------- demo
+const LS = 'vejareservas_demo_';
+const lsGet = (col) => { try { return JSON.parse(localStorage.getItem(LS + col)) || {}; } catch { return {}; } };
+const lsSet = (col, data) => localStorage.setItem(LS + col, JSON.stringify(data));
+const novoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const demoListeners = new Set();
+
+// ---------------------------------------------------------------- auth
+export async function onAuth(cb) {
+  if (modoDemo) {
+    const u = localStorage.getItem(LS + 'sessao');
+    demoListeners.add(cb);
+    cb(u ? { email: u } : null);
+    return;
+  }
+  await initFirebase();
+  au.onAuthStateChanged(fauth, (u) => cb(u ? { email: u.email, uid: u.uid } : null));
+}
+
+export async function login(email, senha) {
+  if (modoDemo) {
+    localStorage.setItem(LS + 'sessao', email || 'demo@vejareservas');
+    demoListeners.forEach((cb) => cb({ email }));
+    return;
+  }
+  await initFirebase();
+  await au.signInWithEmailAndPassword(fauth, email, senha);
+}
+
+export async function recuperarSenha(email) {
+  if (modoDemo) return;
+  await initFirebase();
+  au.useDeviceLanguage(fauth);
+  await au.sendPasswordResetEmail(fauth, email);
+}
+
+export async function logout() {
+  if (modoDemo) {
+    localStorage.removeItem(LS + 'sessao');
+    demoListeners.forEach((cb) => cb(null));
+    return;
+  }
+  await au.signOut(fauth);
+}
+
+// ---------------------------------------------------------------- contas de CLIENTE
+// (no Firebase é o mesmo Authentication; no modo demo usa uma sessão separada)
+const demoUsuarios = () => { try { return JSON.parse(localStorage.getItem(LS + 'usuarios')) || {}; } catch { return {}; } };
+const clienteListeners = new Set();
+const demoSessaoCliente = () => { const e = localStorage.getItem(LS + 'sessao_cliente'); const u = e && demoUsuarios()[e]; return u ? { uid: u.uid, email: e, emailVerified: true } : null; };
+
+export async function clienteOnAuth(cb) {
+  if (modoDemo) { clienteListeners.add(cb); cb(demoSessaoCliente()); return; }
+  await initFirebase();
+  au.onAuthStateChanged(fauth, (u) => cb(u ? { uid: u.uid, email: u.email, emailVerified: u.emailVerified } : null));
+}
+
+export async function clienteCadastrar(email, senha) {
+  if (modoDemo) {
+    const us = demoUsuarios();
+    if (us[email]) throw { code: 'auth/email-already-in-use' };
+    us[email] = { senha, uid: 'c' + novoId() };
+    localStorage.setItem(LS + 'usuarios', JSON.stringify(us));
+    localStorage.setItem(LS + 'sessao_cliente', email);
+    const u = demoSessaoCliente(); clienteListeners.forEach((cb) => cb(u)); return u;
+  }
+  await initFirebase();
+  au.useDeviceLanguage(fauth);
+  const cred = await au.createUserWithEmailAndPassword(fauth, email, senha);
+  await au.sendEmailVerification(cred.user, { url: location.href.split('#')[0] });
+  return { uid: cred.user.uid, email: cred.user.email, emailVerified: false };
+}
+
+export async function clienteEntrar(email, senha) {
+  if (modoDemo) {
+    const u = demoUsuarios()[email];
+    if (!u || u.senha !== senha) throw { code: 'auth/invalid-credential' };
+    localStorage.setItem(LS + 'sessao_cliente', email);
+    const s = demoSessaoCliente(); clienteListeners.forEach((cb) => cb(s)); return s;
+  }
+  await initFirebase();
+  const cred = await au.signInWithEmailAndPassword(fauth, email, senha);
+  return { uid: cred.user.uid, email: cred.user.email, emailVerified: cred.user.emailVerified };
+}
+
+export async function clienteReenviarConfirmacao() {
+  if (modoDemo) return;
+  await au.sendEmailVerification(fauth.currentUser, { url: location.href.split('#')[0] });
+}
+
+// Recarrega o usuário para saber se ele já clicou no link do e-mail
+export async function clienteVerificarEmail() {
+  if (modoDemo) return true;
+  await fauth.currentUser.reload();
+  await fauth.currentUser.getIdToken(true); // atualiza o token para as regras do Firestore
+  return fauth.currentUser.emailVerified;
+}
+
+export async function clienteSair() {
+  if (modoDemo) { localStorage.removeItem(LS + 'sessao_cliente'); clienteListeners.forEach((cb) => cb(null)); return; }
+  await au.signOut(fauth);
+}
+
+// ---------------------------------------------------------------- CRUD
+export async function query(col, campo, valor) {
+  if (modoDemo) return (await list(col)).filter((d) => d[campo] === valor);
+  await initFirebase();
+  const snap = await fs.getDocs(fs.query(fs.collection(fdb, col), fs.where(campo, '==', valor)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function list(col) {
+  if (modoDemo) return Object.entries(lsGet(col)).map(([id, v]) => ({ id, ...v }));
+  await initFirebase();
+  const snap = await fs.getDocs(fs.collection(fdb, col));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function get(col, id) {
+  if (modoDemo) { const v = lsGet(col)[id]; return v ? { id, ...v } : null; }
+  await initFirebase();
+  const d = await fs.getDoc(fs.doc(fdb, col, id));
+  return d.exists() ? { id: d.id, ...d.data() } : null;
+}
+
+export async function add(col, obj) {
+  if (modoDemo) { const all = lsGet(col); const id = novoId(); all[id] = obj; lsSet(col, all); return id; }
+  await initFirebase();
+  const ref = await fs.addDoc(fs.collection(fdb, col), obj);
+  return ref.id;
+}
+
+export async function set(col, id, obj) {
+  if (modoDemo) { const all = lsGet(col); all[id] = obj; lsSet(col, all); return; }
+  await initFirebase();
+  await fs.setDoc(fs.doc(fdb, col, id), obj);
+}
+
+export async function update(col, id, obj) {
+  if (modoDemo) { const all = lsGet(col); all[id] = { ...(all[id] || {}), ...obj }; lsSet(col, all); return; }
+  await initFirebase();
+  await fs.updateDoc(fs.doc(fdb, col, id), obj);
+}
+
+export async function remove(col, id) {
+  if (modoDemo) { const all = lsGet(col); delete all[id]; lsSet(col, all); return; }
+  await initFirebase();
+  await fs.deleteDoc(fs.doc(fdb, col, id));
+}
+
+// Dados de exemplo para o modo demonstração (só na primeira vez)
+export function semearDemo() {
+  if (!modoDemo || localStorage.getItem(LS + 'semeado')) return;
+  const hoje = new Date();
+  const d = (dias) => { const x = new Date(hoje); x.setDate(x.getDate() + dias); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+  const res = {
+    a1: { cliente: 'Mariana Alves', telefone: '27999990001', data: d(1), periodo: '24h', horaEntrada: '09:00', evento: 'Aniversário', valor: 1000, taxaLimpeza: 75, status: 'confirmada', obs: '', pagamentos: [{ valor: 500, data: d(-10), forma: 'Pix' }], criadoEm: d(-10) },
+    a2: { cliente: 'Rafael Costa', telefone: '27999990002', data: d(7), periodo: '12h', horaEntrada: '10:00', evento: 'Confraternização', valor: 770, taxaLimpeza: 75, status: 'confirmada', obs: 'Vai levar som próprio', pagamentos: [{ valor: 845, data: d(-3), forma: 'Pix' }], criadoEm: d(-3) },
+    a3: { cliente: 'Beatriz Lima', telefone: '27999990003', data: d(14), periodo: '24h', horaEntrada: '09:00', evento: 'Chá de bebê', valor: 1000, taxaLimpeza: 75, status: 'pendente', obs: '', pagamentos: [], criadoEm: d(-1) },
+    a4: { cliente: 'Carlos Souza', telefone: '27999990004', data: d(-6), periodo: '24h', horaEntrada: '09:00', evento: 'Churrasco', valor: 1000, taxaLimpeza: 75, status: 'concluida', obs: '', pagamentos: [{ valor: 1075, data: d(-20), forma: 'Dinheiro' }], criadoEm: d(-20) }
+  };
+  lsSet('reservas', res);
+  const ocup = {};
+  Object.values(res).forEach((r) => { if (['pendente', 'confirmada', 'concluida'].includes(r.status)) ocup[r.data] = { status: 'reservado' }; });
+  lsSet('ocupacao', ocup);
+  lsSet('despesas', {
+    b1: { data: d(-8), categoria: 'Produtos de piscina', descricao: 'Cloro e clarificante', valor: 180 },
+    b2: { data: d(-5), categoria: 'Luz', descricao: 'Conta de energia', valor: 320 },
+    b3: { data: d(-4), categoria: 'Material de limpeza', descricao: 'Detergente, desinfetante, sacos', valor: 95 }
+  });
+  lsSet('fotos', { f1: { thumb: 'assets/banner.jpg', legenda: 'Piscina e área de lazer', ordem: 0 } });
+  lsSet('fotosFull', { f1: { img: 'assets/banner.jpg' } });
+  localStorage.setItem(LS + 'semeado', '1');
+}
