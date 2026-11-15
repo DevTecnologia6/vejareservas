@@ -294,7 +294,7 @@ function ligarSolicitacoes(el) {
   $$('[data-aprovar]', el).forEach((b) => (b.onclick = () => {
     const x = state.solicitacoes.find((s) => s.id === b.dataset.aprovar);
     abrirFormReserva({
-      cliente: x.cliente, telefone: x.telefone, data: x.data, dias: x.dias || 1, periodo: x.periodo, evento: x.evento, horaEntrada: x.horaEntrada || state.config.horaEntrada,
+      cliente: x.cliente, telefone: x.telefone, data: x.data, dias: x.dias || 1, meia: !!x.meia, periodo: x.periodo, evento: x.evento, horaEntrada: x.horaEntrada || state.config.horaEntrada,
       valor: x.valor, taxaLimpeza: x.taxaLimpeza, status: x.sinal ? 'confirmada' : 'pendente',
       obs: [`Pré-reserva ${x.codigo} (site)`, x.obs].filter(Boolean).join(' — '),
       clienteCpf: x.clienteCpf || '', clienteEndereco: x.clienteEndereco || '',
@@ -367,7 +367,7 @@ function abrirFormReserva(r = {}) {
   const novo = !r.id;
   const cfg = state.config;
   const v = { periodo: '24h', dias: 1, horaEntrada: cfg.horaEntrada, status: 'pendente', taxaLimpeza: 0, ...r };
-  if (v.valor == null) v.valor = v.periodo === '12h' ? cfg.preco12 : cfg.preco24 * (+v.dias || 1);
+  if (v.valor == null) v.valor = (v.periodo === '12h' ? cfg.preco12 : cfg.preco24 * (+v.dias || 1)) + (v.meia ? +cfg.preco12 : 0);
 
   abrirModal(novo ? 'Nova reserva' : 'Editar reserva', `
     <form id="form-res" class="grade-form">
@@ -382,6 +382,8 @@ function abrirFormReserva(r = {}) {
       <label class="campo">Período
         <select name="periodo"><option value="24h" ${v.periodo === '24h' ? 'selected' : ''}>24 horas (diária)</option><option value="12h" ${v.periodo === '12h' ? 'selected' : ''}>12 horas</option></select></label>
       <label class="campo">Quantidade de diárias<input type="number" name="dias" min="1" max="30" value="${+v.dias || 1}"><span class="horario-info" id="dias-info"></span></label>
+      <label class="campo">+ Meia diária (12h) no final
+        <span style="display:flex;gap:8px;align-items:center;font-weight:400"><input type="checkbox" name="meia" ${v.meia ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0"> Ex.: 3 diárias + 12h = 3 dias e meio</span></label>
       <label class="campo">Horário de entrada<input type="time" name="horaEntrada" value="${esc(v.horaEntrada)}"><span class="horario-info" id="saida-prev"></span></label>
       <label class="campo">Status
         <select name="status">${Object.entries(STATUS).map(([k, s]) => `<option value="${k}" ${v.status === k ? 'selected' : ''}>${s.label}</option>`).join('')}</select></label>
@@ -403,13 +405,13 @@ function abrirFormReserva(r = {}) {
     const f = $('#form-res', m);
     const atualizarTotal = () => ($('#total-prev', m).textContent = fmt((+f.valor.value || 0) + (f.querLimpeza.checked ? +f.taxaLimpeza.value || 0 : 0)));
     const recalcular = () => {
-      if (+f.dias.value > 1) f.periodo.value = '24h';
-      f.periodo.disabled = +f.dias.value > 1;
-      f.valor.value = f.periodo.value === '12h' ? cfg.preco12 : cfg.preco24 * Math.max(1, +f.dias.value || 1);
-      $('#dias-info', m).textContent = +f.dias.value > 1 ? `${f.dias.value} × ${fmt(cfg.preco24)}` : '';
+      if (+f.dias.value > 1 || f.meia.checked) f.periodo.value = '24h';
+      f.periodo.disabled = +f.dias.value > 1 || f.meia.checked;
+      f.valor.value = (f.periodo.value === '12h' ? cfg.preco12 : cfg.preco24 * Math.max(1, +f.dias.value || 1)) + (f.meia.checked ? +cfg.preco12 : 0);
+      $('#dias-info', m).textContent = (+f.dias.value > 1 ? `${f.dias.value} × ${fmt(cfg.preco24)}` : '') + (f.meia.checked ? ` + 12h ${fmt(cfg.preco12)}` : '');
       atualizarTotal(); atualizarSaida();
     };
-    f.periodo.onchange = recalcular;
+    f.periodo.onchange = recalcular; f.meia.onchange = recalcular;
     const diff = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${a}T12:00:00`)) / 864e5);
     f.dias.oninput = () => { if (f.data.value) f.dataFim.value = addDias(f.data.value, Math.max(1, +f.dias.value || 1) - 1); recalcular(); };
     f.dataFim.oninput = () => {
@@ -418,13 +420,13 @@ function abrirFormReserva(r = {}) {
       f.dias.value = Math.min(30, diff(f.data.value, f.dataFim.value) + 1); recalcular();
     };
     f.data.addEventListener('input', () => { if (f.data.value) f.dataFim.value = addDias(f.data.value, Math.max(1, +f.dias.value || 1) - 1); recalcular(); });
-    f.periodo.disabled = +f.dias.value > 1;
+    f.periodo.disabled = +f.dias.value > 1 || f.meia.checked;
     f.valor.oninput = f.taxaLimpeza.oninput = atualizarTotal;
     const atualizarSaida = () => {
       const el = $('#saida-prev', m);
       if (!f.data.value || !f.horaEntrada.value) return (el.textContent = '');
       const [h, mi] = f.horaEntrada.value.split(':').map(Number);
-      const d = saidaDate({ data: f.data.value, horaEntrada: f.horaEntrada.value, periodo: f.periodo.value, dias: +f.dias.value || 1 });
+      const d = saidaDate({ data: f.data.value, horaEntrada: f.horaEntrada.value, periodo: f.periodo.value, dias: +f.dias.value || 1, meia: f.meia.checked });
       el.innerHTML = `Saída prevista: <b>${br(toISO(d))} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</b>`;
     };
     f.data.addEventListener('input', atualizarSaida); f.horaEntrada.addEventListener('input', atualizarSaida); f.periodo.addEventListener('change', atualizarSaida);
@@ -441,9 +443,9 @@ function abrirFormReserva(r = {}) {
       const d = Object.fromEntries(new FormData(f));
       const nDias = Math.min(30, Math.max(1, +d.dias || 1));
       const dados = {
-        dias: nDias,
+        dias: nDias, meia: !!d.meia,
         cliente: d.cliente.trim(), telefone: soDigitos(d.telefone), evento: d.evento.trim(), data: d.data || '',
-        periodo: nDias > 1 ? '24h' : f.periodo.value, horaEntrada: d.horaEntrada, status: d.status, valor: +d.valor || 0,
+        periodo: nDias > 1 || d.meia ? '24h' : f.periodo.value, horaEntrada: d.horaEntrada, status: d.status, valor: +d.valor || 0,
         taxaLimpeza: d.querLimpeza ? +d.taxaLimpeza || 0 : 0, obs: d.obs.trim(),
         clienteCpf: soDigitos(d.clienteCpf), clienteEndereco: (d.clienteEndereco || '').trim()
       };

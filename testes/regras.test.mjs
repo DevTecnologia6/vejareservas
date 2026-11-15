@@ -6,6 +6,7 @@ await env.withSecurityRulesDisabled(async (c) => {
   await d.doc('publico/info').set({ nome: 'X', preReserva: true });
   await d.doc('ocupacao/2026-12-01').set({ status: 'reservado' });
   await d.doc('clientes/ane').set({ nome: 'Ane' });
+  await d.doc('publico/info').set({ nome: 'X', preReserva: true, preco12: 770, preco24: 1000, taxaLimpeza: 75, sinalPct: 50, prazoPagamentoMin: 30 });
 });
 const tok = (extra) => ({ email: 'ane@x.com', email_verified: true, auth_time: 1700000000, ...extra });
 const cli = env.authenticatedContext('ane', tok()).firestore();
@@ -15,6 +16,13 @@ await r('cliente lista ocupacao', assertSucceeds(cli.collection('ocupacao').get(
 await r('cliente lê o próprio perfil', assertSucceeds(cli.doc('clientes/ane').get()));
 const nv = env.authenticatedContext('nv', tok({ email: 'nv@x.com', email_verified: false })).firestore();
 await r('não verificado bloqueado', assertFails(nv.doc('publico/info').get()));
+const EXP = Date.now() + 20 * 60000;
+const sol = (extra) => ({ uid: 'ane', email: 'ane@x.com', cliente: 'Ane Teste', telefone: '27999998888', data: '2027-01-16', dias: 3, periodo: '24h', horaEntrada: '08:00', evento: 'Festa', obs: '', valor: 3000, taxaLimpeza: 0, total: 3000, sinal: 1500, codigo: 'VEJA1', status: 'aguardando', criadoEm: 'x', expiraEm: EXP, aceitouRegras: true, aceiteContrato: 'x', ...extra });
+await r('pré-reserva 3 diárias', assertSucceeds(cli.doc('solicitacoes/s1').set(sol())));
+await r('pré-reserva 3 diárias + meia', assertSucceeds(cli.doc('solicitacoes/s2').set(sol({ meia: true, valor: 3770, total: 3770, sinal: 1885 }))));
+await r('meia com preço errado recusada', assertFails(cli.doc('solicitacoes/s3').set(sol({ meia: true }))));
+await r('segura o dia extra da meia diária (19/01)', assertSucceeds(cli.doc('ocupacao/2027-01-19').set({ status: 'pendente', expiraEm: EXP, sol: 's2' })));
+await r('sem meia não segura o 19/01', assertFails(cli.doc('ocupacao/2027-01-19').set({ status: 'pendente', sol: 's1', expiraEm: 1 })));
 const dono = env.authenticatedContext('dono', tok({ email: 'devtecnologia6@gmail.com' })).firestore();
 await r('dono sem senha bloqueado', assertFails(dono.doc('config/geral').get()));
 await env.cleanup();
