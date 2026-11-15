@@ -1076,7 +1076,7 @@ async function iniciar() {
       $('#link-para').textContent = email; mostrarForm('#link-enviado');
     } catch (err) {
       console.error(err);
-      $('#link-erro').textContent = /operation-not-allowed/.test(err.code) ? 'O login por link ainda não foi ativado no Firebase.' : /too-many/.test(err.code) ? 'Muitas tentativas. Aguarde alguns minutos.' : 'Não foi possível enviar: ' + (err.code || err.message);
+      $('#link-erro').textContent = /operation-not-allowed/.test(err.code) ? 'O login por link ainda não foi ativado no Firebase.' : /quota-exceeded/.test(err.code) ? 'Limite de links de hoje atingido (o Firebase gratuito envia 5 por dia). Tente amanhã ou use um aparelho já autorizado.' : /too-many/.test(err.code) ? 'Muitas tentativas. Aguarde alguns minutos.' : 'Não foi possível enviar: ' + (err.code || err.message);
     }
     btn.disabled = false; btn.textContent = 'Continuar';
   };
