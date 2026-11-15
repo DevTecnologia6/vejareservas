@@ -2,7 +2,7 @@
 //  VejaReservas — painel administrativo
 // =====================================================================
 import * as db from './db.js';
-import { renderCalendario, MESES, toISO } from './calendar.js';
+import { renderCalendario, MESES, toISO, addDias, datasDe, periodoTxt, saidaDate } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { comprimir, abrirVisualizador } from './fotos.js';
 import { htmlContrato, abrirContrato, CLAUSULAS_PADRAO, cpfFmt, cpfMascarado, cpfValido } from './contrato.js';
@@ -32,6 +32,7 @@ const ICO = {
   cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>',
   din: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
   lista: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  pessoas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   foto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
   eng: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>',
@@ -74,6 +75,7 @@ const contratoSnapshot = () => {
   return { nomeEspaco: c.nome, locadorNome: c.locadorNome, locadorCpf: c.locadorCpf, locadorEndereco: c.locadorEndereco, imovelEndereco: c.imovelEndereco, foro: c.foro, clausulas: c.clausulas, assinatura: c.assinatura, geradoEm: new Date().toISOString() };
 };
 
+const datasTxt = (r) => (r?.data ? br(r.data) + ((+r.dias || 1) > 1 ? ` a ${br(addDias(r.data, r.dias - 1))}` : '') : '—');
 const selo = (s) => `<span class="selo st-${s}">${STATUS[s]?.label || s}</span>`;
 
 // ---------------------------------------------------------------- estado
@@ -96,15 +98,23 @@ async function carregar() {
   state.solicitacoes = sols.filter((x) => x.status !== 'recusada').sort((a, b) => String(a.data).localeCompare(String(b.data)));
   state.despesas = despesas;
   state.config = { ...CONFIG_PADRAO, ...(cfg || {}) };
+  // reservas confirmadas antes do recurso de contrato: grava os dados do contrato agora
+  if (state.config.locadorNome) {
+    for (const r of state.reservas.filter((x) => ['confirmada', 'concluida'].includes(x.status) && !x.contrato)) {
+      r.contrato = contratoSnapshot();
+      db.update('reservas', r.id, { contrato: r.contrato }).catch(() => {});
+    }
+  }
   $('#nome-espaco').textContent = state.config.nome;
 }
 
 // Mantém a coleção pública "ocupacao" (só datas, sem dados de clientes)
 async function sincronizarOcupacao(...datas) {
   for (const data of new Set(datas.filter(Boolean))) {
-    const temSol = state.solicitacoes.some((x) => x.data === data);
-    const ocupada = temSol || state.reservas.some((r) => r.data === data && OCUPA.includes(r.status));
-    const pendente = ocupada && !state.reservas.some((r) => r.data === data && ['confirmada', 'concluida'].includes(r.status));
+    const cobre = (x) => datasDe(x).includes(data);
+    const temSol = state.solicitacoes.some(cobre);
+    const ocupada = temSol || state.reservas.some((r) => cobre(r) && OCUPA.includes(r.status));
+    const pendente = ocupada && !state.reservas.some((r) => cobre(r) && ['confirmada', 'concluida'].includes(r.status));
     if (ocupada) await db.set('ocupacao', data, { status: pendente ? 'pendente' : 'reservado' });
     else await db.remove('ocupacao', data).catch(() => {});
   }
@@ -116,6 +126,7 @@ const PAGINAS = {
   reservas: { titulo: 'Reservas', menu: 'Reservas', ico: ICO.cal, render: renderReservas },
   financeiro: { titulo: 'Financeiro', menu: 'Financeiro', ico: ICO.din, render: renderFinanceiro },
   despesas: { titulo: 'Despesas', menu: 'Despesas', ico: ICO.lista, render: renderDespesas },
+  clientes: { titulo: 'Clientes', menu: 'Clientes', ico: ICO.pessoas, render: renderClientes },
   fotos: { titulo: 'Fotos da casa', menu: 'Fotos', ico: ICO.foto, render: renderFotos },
   config: { titulo: 'Configurações', menu: 'Ajustes', ico: ICO.eng, render: renderConfig }
 };
@@ -186,13 +197,13 @@ function renderInicio(el) {
   const desenhar = () => {
     const marc = {};
     state.reservas.filter((r) => OCUPA.includes(r.status) && r.data).forEach((r) => {
-      marc[r.data] = r.status === 'pendente' && marc[r.data] !== 'reservado' ? 'pendente' : 'reservado';
+      datasDe(r).forEach((d) => { marc[d] = r.status === 'pendente' && marc[d] !== 'reservado' ? 'pendente' : 'reservado'; });
     });
-    state.solicitacoes.forEach((x) => { if (!marc[x.data]) marc[x.data] = 'pendente'; });
+    state.solicitacoes.forEach((x) => datasDe(x).forEach((d) => { if (!marc[d]) marc[d] = 'pendente'; }));
     $('#cal-titulo').textContent = nomeMes(state.mesInicio);
     renderCalendario($('#cal'), state.mesInicio, marc, (iso, estado) => {
       if (estado === 'livre') abrirFormReserva({ data: iso });
-      else { const r = state.reservas.find((x) => x.data === iso && OCUPA.includes(x.status)); if (r) abrirDetalhe(r.id); else toast('Pré-reserva do site aguardando aprovação.'); }
+      else { const r = state.reservas.find((x) => datasDe(x).includes(iso) && OCUPA.includes(x.status)); if (r) abrirDetalhe(r.id); else toast('Pré-reserva do site aguardando aprovação.'); }
     });
   };
   const mover = (n) => { state.mesInicio = new Date(state.mesInicio.getFullYear(), state.mesInicio.getMonth() + n, 1); desenhar(); };
@@ -211,7 +222,7 @@ function blocoSolicitacoes() {
     <div class="lista-res">${state.solicitacoes.map((x) => `
       <div class="item-res">
         <div class="ico">${ICO.cal}</div>
-        <div class="meio"><b>${esc(x.cliente)}</b><small>${br(x.data)} — ${esc(x.evento || 'Evento')} · ${x.periodo}${x.horaEntrada ? ' · entrada ' + x.horaEntrada : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
+        <div class="meio"><b>${esc(x.cliente)}</b><small>${datasTxt(x)} — ${esc(x.evento || 'Evento')} · ${periodoTxt(x)}${x.horaEntrada ? ' · entrada ' + x.horaEntrada : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
           <small style="display:block">${foneFmt(x.telefone)}${x.email ? ` · ${esc(x.email)}` : ''}${x.sinal ? ` · sinal via Pix: ${fmt(x.sinal)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small></div>
         <div class="dir"><b style="margin:0 0 8px">${fmt(x.total)}</b><div class="acoes">
           <a class="btn btn-verde btn-peq" target="_blank" rel="noopener" title="WhatsApp" href="https://wa.me/${foneBR(x.telefone)}?text=${encodeURIComponent(`Olá, ${x.cliente.split(' ')[0]}! Recebemos sua pré-reserva ${x.codigo} do ${state.config.nome} para ${br(x.data)}.`)}">${ICO.zap}</a>
@@ -251,7 +262,7 @@ function ligarCancelamentos(el) {
     const id = b.dataset.aceitarcanc;
     const r = state.reservas.find((y) => y.id === id);
     if (!confirm('Aceitar o cancelamento? A reserva será marcada como cancelada e a data volta a ficar livre. Se houver reembolso, faça pelo seu banco.')) return;
-    if (r) { await db.update('reservas', id, { status: 'cancelada' }); r.status = 'cancelada'; await sincronizarOcupacao(r.data); }
+    if (r) { await db.update('reservas', id, { status: 'cancelada' }); r.status = 'cancelada'; await sincronizarOcupacao(...datasDe(r)); }
     await db.update('cancelamentos', id, { status: 'aceito' });
     state.cancelamentos = state.cancelamentos.filter((x) => x.id !== id);
     toast('Reserva cancelada.'); rerender();
@@ -262,7 +273,7 @@ function ligarSolicitacoes(el) {
   $$('[data-aprovar]', el).forEach((b) => (b.onclick = () => {
     const x = state.solicitacoes.find((s) => s.id === b.dataset.aprovar);
     abrirFormReserva({
-      cliente: x.cliente, telefone: x.telefone, data: x.data, periodo: x.periodo, evento: x.evento, horaEntrada: x.horaEntrada || state.config.horaEntrada,
+      cliente: x.cliente, telefone: x.telefone, data: x.data, dias: x.dias || 1, periodo: x.periodo, evento: x.evento, horaEntrada: x.horaEntrada || state.config.horaEntrada,
       valor: x.valor, taxaLimpeza: x.taxaLimpeza, status: x.sinal ? 'confirmada' : 'pendente',
       obs: [`Pré-reserva ${x.codigo} (site)`, x.obs].filter(Boolean).join(' — '),
       clienteCpf: x.clienteCpf || '', clienteEndereco: x.clienteEndereco || '',
@@ -274,7 +285,7 @@ function ligarSolicitacoes(el) {
     if (!confirm(`Recusar a pré-reserva de ${x.cliente} (${br(x.data)})? A data volta a ficar livre no calendário.`)) return;
     await db.update('solicitacoes', x.id, { status: 'recusada' }); // o cliente vê "Não aprovada" na conta dele
     state.solicitacoes = state.solicitacoes.filter((s) => s.id !== x.id);
-    await sincronizarOcupacao(x.data);
+    await sincronizarOcupacao(...datasDe(x));
     toast('Pré-reserva recusada.'); rerender();
   }));
 }
@@ -283,7 +294,7 @@ function itemReserva(r) {
   const c = calc(r);
   return `<div class="item-res" data-id="${r.id}">
     <div class="ico">${ICO.cal}</div>
-    <div class="meio"><b>${esc(r.cliente)}</b><small>${br(r.data)} — ${esc(r.evento || 'Evento')} · ${r.periodo}</small></div>
+    <div class="meio"><b>${esc(r.cliente)}</b><small>${datasTxt(r)} — ${esc(r.evento || 'Evento')} · ${periodoTxt(r)}</small></div>
     <div class="dir">${selo(r.status)}<b>${fmt(c.total)}</b>${c.falta > 0 && r.status !== 'cancelada' ? `<small style="color:var(--laranja);font-size:12px">falta ${fmt(c.falta)}</small>` : ''}</div>
   </div>`;
 }
@@ -334,8 +345,8 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharModa
 function abrirFormReserva(r = {}) {
   const novo = !r.id;
   const cfg = state.config;
-  const v = { periodo: '24h', horaEntrada: cfg.horaEntrada, status: 'pendente', taxaLimpeza: 0, ...r };
-  if (v.valor == null) v.valor = v.periodo === '12h' ? cfg.preco12 : cfg.preco24;
+  const v = { periodo: '24h', dias: 1, horaEntrada: cfg.horaEntrada, status: 'pendente', taxaLimpeza: 0, ...r };
+  if (v.valor == null) v.valor = v.periodo === '12h' ? cfg.preco12 : cfg.preco24 * (+v.dias || 1);
 
   abrirModal(novo ? 'Nova reserva' : 'Editar reserva', `
     <form id="form-res" class="grade-form">
@@ -347,7 +358,8 @@ function abrirFormReserva(r = {}) {
         <datalist id="eventos"><option>Aniversário</option><option>Confraternização</option><option>Chá de bebê</option><option>Churrasco</option><option>Casamento</option><option>Day use</option></datalist></label>
       <label class="campo">Data${v.status === 'congelada' ? ' (opcional se congelada)' : ''}<input type="date" name="data" value="${esc(v.data)}"></label>
       <label class="campo">Período
-        <select name="periodo"><option value="24h" ${v.periodo === '24h' ? 'selected' : ''}>24 horas</option><option value="12h" ${v.periodo === '12h' ? 'selected' : ''}>12 horas</option></select></label>
+        <select name="periodo"><option value="24h" ${v.periodo === '24h' ? 'selected' : ''}>24 horas (diária)</option><option value="12h" ${v.periodo === '12h' ? 'selected' : ''}>12 horas</option></select></label>
+      <label class="campo">Quantidade de diárias<input type="number" name="dias" min="1" max="30" value="${+v.dias || 1}"><span class="horario-info" id="dias-info"></span></label>
       <label class="campo">Horário de entrada<input type="time" name="horaEntrada" value="${esc(v.horaEntrada)}"><span class="horario-info" id="saida-prev"></span></label>
       <label class="campo">Status
         <select name="status">${Object.entries(STATUS).map(([k, s]) => `<option value="${k}" ${v.status === k ? 'selected' : ''}>${s.label}</option>`).join('')}</select></label>
@@ -368,13 +380,21 @@ function abrirFormReserva(r = {}) {
     </form>`, (m) => {
     const f = $('#form-res', m);
     const atualizarTotal = () => ($('#total-prev', m).textContent = fmt((+f.valor.value || 0) + (f.querLimpeza.checked ? +f.taxaLimpeza.value || 0 : 0)));
-    f.periodo.onchange = () => { f.valor.value = f.periodo.value === '12h' ? cfg.preco12 : cfg.preco24; atualizarTotal(); };
+    const recalcular = () => {
+      if (+f.dias.value > 1) f.periodo.value = '24h';
+      f.periodo.disabled = +f.dias.value > 1;
+      f.valor.value = f.periodo.value === '12h' ? cfg.preco12 : cfg.preco24 * Math.max(1, +f.dias.value || 1);
+      $('#dias-info', m).textContent = +f.dias.value > 1 ? `${f.dias.value} × ${fmt(cfg.preco24)}` : '';
+      atualizarTotal(); atualizarSaida();
+    };
+    f.periodo.onchange = recalcular; f.dias.oninput = recalcular;
+    f.periodo.disabled = +f.dias.value > 1;
     f.valor.oninput = f.taxaLimpeza.oninput = atualizarTotal;
     const atualizarSaida = () => {
       const el = $('#saida-prev', m);
       if (!f.data.value || !f.horaEntrada.value) return (el.textContent = '');
       const [h, mi] = f.horaEntrada.value.split(':').map(Number);
-      const d = new Date(`${f.data.value}T00:00:00`); d.setHours(h + (f.periodo.value === '12h' ? 12 : 24), mi);
+      const d = saidaDate({ data: f.data.value, horaEntrada: f.horaEntrada.value, periodo: f.periodo.value, dias: +f.dias.value || 1 });
       el.innerHTML = `Saída prevista: <b>${br(toISO(d))} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</b>`;
     };
     f.data.addEventListener('input', atualizarSaida); f.horaEntrada.addEventListener('input', atualizarSaida); f.periodo.addEventListener('change', atualizarSaida);
@@ -389,17 +409,20 @@ function abrirFormReserva(r = {}) {
     f.onsubmit = async (e) => {
       e.preventDefault();
       const d = Object.fromEntries(new FormData(f));
+      const nDias = Math.min(30, Math.max(1, +d.dias || 1));
       const dados = {
+        dias: nDias,
         cliente: d.cliente.trim(), telefone: soDigitos(d.telefone), evento: d.evento.trim(), data: d.data || '',
-        periodo: d.periodo, horaEntrada: d.horaEntrada, status: d.status, valor: +d.valor || 0,
+        periodo: nDias > 1 ? '24h' : f.periodo.value, horaEntrada: d.horaEntrada, status: d.status, valor: +d.valor || 0,
         taxaLimpeza: d.querLimpeza ? +d.taxaLimpeza || 0 : 0, obs: d.obs.trim(),
         clienteCpf: soDigitos(d.clienteCpf), clienteEndereco: (d.clienteEndereco || '').trim()
       };
       if (dados.clienteCpf && !cpfValido(dados.clienteCpf)) return ($('#res-erro', m).textContent = 'CPF do cliente inválido.');
       if (!dados.data && dados.status !== 'congelada') return ($('#res-erro', m).textContent = 'Informe a data (só reservas congeladas podem ficar sem data).');
       if (dados.data && OCUPA.includes(dados.status)) {
-        const choque = state.reservas.find((x) => x.id !== r.id && x.data === dados.data && OCUPA.includes(x.status));
-        if (choque && !confirm(`Atenção: ${br(dados.data)} já está reservado para ${choque.cliente}. Salvar mesmo assim?`)) return;
+        const minhas = datasDe(dados);
+        const choque = state.reservas.find((x) => x.id !== r.id && OCUPA.includes(x.status) && datasDe(x).some((d) => minhas.includes(d)));
+        if (choque && !confirm(`Atenção: essas datas coincidem com a reserva de ${choque.cliente} (${datasTxt(choque)}). Salvar mesmo assim?`)) return;
       }
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Salvando…';
       try {
@@ -421,7 +444,7 @@ function abrirFormReserva(r = {}) {
           await db.update('reservas', r.id, dados);
           Object.assign(state.reservas.find((x) => x.id === r.id), dados);
         }
-        await sincronizarOcupacao(dados.data, r.data);
+        await sincronizarOcupacao(...datasDe(dados), ...datasDe(r));
         fecharModal(); toast(novo ? 'Reserva cadastrada!' : 'Reserva atualizada!'); rerender();
       } catch (err) {
         console.error(err); btn.disabled = false; btn.textContent = 'Tentar de novo';
@@ -436,19 +459,14 @@ function abrirDetalhe(id) {
   const r = state.reservas.find((x) => x.id === id);
   if (!r) return;
   const c = calc(r);
-  const saida = (() => {
-    if (!r.data || !r.horaEntrada) return '';
-    const [h, mi] = r.horaEntrada.split(':').map(Number);
-    const dt = new Date(`${r.data}T00:00:00`); dt.setHours(h + (r.periodo === '12h' ? 12 : 24), mi);
-    return `${br(toISO(dt))} às ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
-  })();
-  const msgCliente = encodeURIComponent(`Olá, ${r.cliente.split(' ')[0]}! Aqui é do ${state.config.nome}. Sobre a sua reserva do dia ${br(r.data)} (${r.periodo}, entrada às ${r.horaEntrada})` + (c.falta > 0 ? `, fica um saldo de ${fmt(c.falta)} a acertar.` : '. Está tudo certo! 😊'));
+  const saida = (() => { const dt = saidaDate(r); return dt ? fmtDataHora(dt.getTime()) : ''; })();
+  const msgCliente = encodeURIComponent(`Olá, ${r.cliente.split(' ')[0]}! Aqui é do ${state.config.nome}. Sobre a sua reserva de ${datasTxt(r)} (${periodoTxt(r)}, entrada às ${r.horaEntrada})` + (c.falta > 0 ? `, fica um saldo de ${fmt(c.falta)} a acertar.` : '. Está tudo certo! 😊'));
 
   abrirModal(esc(r.cliente), `
     <div style="margin-bottom:14px">${selo(r.status)} <small style="color:var(--cinza);margin-left:6px">${STATUS[r.status]?.ajuda || ''}</small></div>
     <div class="det-grade">
-      <div><small>Data</small><b>${br(r.data)}</b></div>
-      <div><small>Período</small><b>${r.periodo} · entrada ${r.horaEntrada || '—'}</b></div>
+      <div><small>Data${(+r.dias || 1) > 1 ? 's' : ''}</small><b>${datasTxt(r)}</b></div>
+      <div><small>Período</small><b>${periodoTxt(r)} · entrada ${r.horaEntrada || '—'}</b></div>
       <div><small>Saída prevista</small><b>${saida || '—'}</b></div>
       ${r.prazoCancelamento ? `<div><small>Cliente pode cancelar até</small><b class="${Date.now() > r.prazoCancelamento ? 'negativo' : ''}">${fmtDataHora(r.prazoCancelamento)}${Date.now() > r.prazoCancelamento ? ' (encerrado)' : ''}</b></div>` : ''}
       <div><small>Evento</small><b>${esc(r.evento || '—')}</b></div>
@@ -486,7 +504,7 @@ function abrirDetalhe(id) {
       if (!confirm(`Excluir a reserva de ${r.cliente}? Isso não pode ser desfeito.`)) return;
       await db.remove('reservas', r.id);
       state.reservas = state.reservas.filter((x) => x.id !== r.id);
-      await sincronizarOcupacao(r.data);
+      await sincronizarOcupacao(...datasDe(r));
       fecharModal(); toast('Reserva excluída.'); rerender();
     };
     $$('[data-delpag]', m).forEach((b) => (b.onclick = async () => {
@@ -520,7 +538,7 @@ function abrirPagamento(r) {
       if ((upd.status || r.status) === 'confirmada' && !r.contrato) upd.contrato = contratoSnapshot();
       await db.update('reservas', r.id, upd);
       Object.assign(r, upd);
-      await sincronizarOcupacao(r.data);
+      await sincronizarOcupacao(...datasDe(r));
       toast('Pagamento registrado!'); abrirDetalhe(r.id); rerender();
     };
   });
@@ -648,6 +666,70 @@ function abrirFormDespesa(d = {}) {
       else { await db.update('despesas', d.id, dados); Object.assign(state.despesas.find((x) => x.id === d.id), dados); }
       state.mesDesp = new Date(`${dados.data}T12:00:00`);
       fecharModal(); toast('Despesa salva!'); rerender();
+    };
+  });
+}
+
+// ---------------------------------------------------------------- CLIENTES
+async function renderClientes(el) {
+  el.innerHTML = '<div class="card"><div class="vazio">Carregando clientes…</div></div>';
+  let clientes = [];
+  try { clientes = (await db.list('clientes')).sort((a, b) => String(a.nome).localeCompare(String(b.nome))); }
+  catch (err) { console.error(err); el.innerHTML = '<div class="card"><div class="vazio">Não foi possível carregar os clientes. Confira se as regras do Firestore estão atualizadas.</div></div>'; return; }
+  let busca = '';
+  const desenhar = () => {
+    const q = busca.toLowerCase();
+    const lista = clientes.filter((c) => !q || [c.nome, c.email, c.telefone, c.cpf].some((v) => String(v || '').toLowerCase().includes(q)));
+    $('#lista-cli').innerHTML = lista.length ? lista.map((c) => {
+      const res = state.reservas.filter((r) => r.clienteUid === c.id);
+      return `<div class="item-res" style="cursor:default;flex-wrap:wrap">
+        <div class="ico">${ICO.pessoas}</div>
+        <div class="meio"><b>${esc(c.nome)}</b>
+          <small>${esc(c.email || '')} · ${foneFmt(c.telefone)}${c.cpf ? ` · CPF ${cpfFmt(c.cpf)}` : ''}</small>
+          <small style="display:block">${esc(c.endereco || '')}</small>
+          <small style="display:block">${res.length} reserva(s) · cadastro em ${c.criadoEm ? br(String(c.criadoEm).slice(0, 10)) : '—'}</small></div>
+        <div class="dir"><div class="acoes">
+          ${c.telefone ? `<a class="btn btn-verde btn-peq" target="_blank" rel="noopener" title="WhatsApp" href="https://wa.me/${foneBR(c.telefone)}">${ICO.zap}</a>` : ''}
+          <button class="btn btn-perigo btn-peq" data-excluir="${c.id}">Excluir conta</button></div></div>
+      </div>`;
+    }).join('') : '<div class="vazio">Nenhum cliente encontrado.</div>';
+    $$('[data-excluir]', el).forEach((b) => (b.onclick = () => excluirCliente(clientes.find((c) => c.id === b.dataset.excluir), () => { clientes = clientes.filter((c) => c.id !== b.dataset.excluir); desenhar(); })));
+  };
+  el.innerHTML = `<div class="card">
+    <div class="card-topo"><div><h3>Clientes cadastrados</h3><small style="color:var(--cinza)">${clientes.length} conta(s)</small></div></div>
+    <div class="filtros"><input id="busca-cli" placeholder="Buscar por nome, e-mail, telefone ou CPF…"></div>
+    <div class="lista-res" id="lista-cli"></div></div>`;
+  $('#busca-cli').oninput = (e) => { busca = e.target.value; desenhar(); };
+  desenhar();
+}
+
+function excluirCliente(c, depois) {
+  abrirModal('Excluir conta do cliente', `
+    <p style="margin-bottom:12px">Excluir a conta de <b>${esc(c.nome)}</b> (${esc(c.email || '')})?</p>
+    <div class="box-valores" style="font-size:14px;line-height:1.5">
+      • O acesso dele ao site é <b>bloqueado na hora</b>.<br>
+      • O cadastro (nome, CPF, endereço) é apagado e as pré-reservas pendentes dele são canceladas.<br>
+      • O login (e-mail e senha) é apagado de vez na próxima execução do robô (todo dia às 9h, ou rodando o robô no GitHub → Actions).<br>
+      • As reservas já confirmadas continuam no seu histórico.
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-top:12px"><input type="checkbox" id="bloq-email"> Impedir que este e-mail crie uma conta nova</label>
+    <div class="modal-acoes"><button class="btn btn-claro" data-fechar2>Cancelar</button><button class="btn btn-perigo" id="conf-excluir">Excluir conta</button></div>`, (m) => {
+    $('[data-fechar2]', m).onclick = fecharModal;
+    $('#conf-excluir', m).onclick = async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Excluindo…';
+      try {
+        await db.set('bloqueados', c.id, { email: c.email || '', nome: c.nome || '', excluirLogin: true, em: new Date().toISOString() });
+        if ($('#bloq-email', m).checked && c.email) await db.set('bloqueiosEmail', c.email.toLowerCase(), { em: new Date().toISOString() });
+        await db.remove('clientes', c.id);
+        const pend = state.solicitacoes.filter((x) => x.uid === c.id);
+        for (const x of pend) await db.update('solicitacoes', x.id, { status: 'recusada' });
+        state.solicitacoes = state.solicitacoes.filter((x) => x.uid !== c.id);
+        await sincronizarOcupacao(...pend.flatMap((x) => datasDe(x)));
+        fecharModal(); toast('Conta excluída.'); depois && depois();
+      } catch (err) {
+        console.error(err); e.target.disabled = false; e.target.textContent = 'Tentar de novo';
+        toast('Não foi possível excluir. Confira se as regras do Firestore estão atualizadas.');
+      }
     };
   });
 }

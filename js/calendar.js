@@ -33,3 +33,19 @@ export function renderCalendario(el, mes, marcados, onClick, opts = {}) {
   el.innerHTML = html;
   el.querySelectorAll('.cal-dia').forEach((b) => b.addEventListener('click', () => onClick && onClick(b.dataset.iso, b.dataset.estado)));
 }
+
+// ---- várias diárias ----
+export const addDias = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return toISO(d); };
+/** Todas as datas ocupadas por uma reserva (data inicial + nº de diárias) */
+export const datasDe = (r) => { if (!r?.data) return []; const n = Math.max(1, +r.dias || 1); return [...Array(n)].map((_, i) => addDias(r.data, i)); };
+/** Texto do período: "12h", "24h" ou "4 diárias" */
+export const periodoTxt = (r) => ((+r.dias || 1) > 1 ? `${r.dias} diárias` : r.periodo || '24h');
+/** Data/hora de saída prevista (Date) */
+export function saidaDate(r) {
+  if (!r?.data || !r.horaEntrada) return null;
+  const [h, m] = r.horaEntrada.split(':').map(Number);
+  const d = new Date(`${r.data}T00:00:00`);
+  const horas = (+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24;
+  d.setHours(h + horas, m);
+  return d;
+}

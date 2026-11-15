@@ -366,3 +366,5 @@ table.tabela { width: 100%; border-collapse: collapse; font-size: 14px; }
   .contrato-assin { break-inside: avoid; }
   @page { margin: 18mm 16mm; }
 }
+
+.contrato-doc.contrato-pdf { box-shadow: none; max-width: none; width: 182mm; padding: 0; margin: 0; font-size: 12.5px; }

@@ -99,6 +99,13 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - Reservas cadastradas por você mesmo também geram contrato: preencha CPF e endereço do cliente no formulário.
 - Para validade jurídica ainda maior, você pode assinar o PDF gratuitamente pelo **assinador do gov.br**.
 
+## 5.0.2 Várias diárias, cadastro completo e clientes
+
+- **Várias datas seguidas:** no calendário o cliente toca no primeiro dia e depois no último (ex.: 18 → 21). O sistema reserva as 4 diárias (24h cada), calcula o valor (diárias × preço de 24h), mostra entrada e saída e ocupa todas as datas. No painel, use o campo **Quantidade de diárias**.
+- **Cadastro do cliente:** todos os campos são obrigatórios (nome completo, WhatsApp com 11 dígitos, CPF com 11 números, CEP, rua, número, bairro, cidade/UF, e-mail e senha). O CEP preenche rua, bairro e cidade sozinho.
+- **Contrato:** botão **⬇ Baixar PDF** gera o arquivo direto (e **🖨 Imprimir** como alternativa).
+- **Clientes (menu do painel):** lista de contas com busca, WhatsApp e **Excluir conta** — o acesso é bloqueado na hora, o cadastro é apagado e o login (e-mail/senha) é removido pelo robô do GitHub na próxima execução (todo dia às 9h ou em *Actions → Run workflow*). Opcionalmente, impede o e-mail de criar conta nova.
+
 ## 5.1 Horários e fotos
 
 - **Horário de entrada**: em *Ajustes*, defina os horários que o cliente pode escolher (ex.: `08:00, 09:00, 10:00, 12:00, 14:00`). Na pré-reserva ele escolhe um deles e o sistema mostra a **saída prevista** (12h ou 24h depois). No painel você pode digitar qualquer horário ao cadastrar ou editar.

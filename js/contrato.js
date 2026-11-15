@@ -53,7 +53,8 @@ export function cpfValido(c) {
 function saida(r) {
   if (!r.data || !r.horaEntrada) return '';
   const [h, m] = r.horaEntrada.split(':').map(Number);
-  const d = new Date(`${r.data}T00:00:00`); d.setHours(h + (r.periodo === '12h' ? 12 : 24), m);
+  const d = new Date(`${r.data}T00:00:00`);
+  d.setHours(h + ((+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24), m);
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
@@ -85,10 +86,10 @@ export function htmlContrato(r, k, op = {}) {
     <p>As partes acima identificadas têm entre si, justo e contratado, o presente contrato, que se regerá pelas cláusulas seguintes.</p>
 
     <h4>CLÁUSULA 1ª – DO OBJETO E DO PERÍODO</h4>
-    <p>O LOCADOR cede ao LOCATÁRIO, para uso temporário${r.evento ? ` destinado ao evento <b>${esc(r.evento)}</b>` : ''}, o imóvel denominado <b>${esc(k.nomeEspaco || 'Espaço Veja')}</b>, situado em ${linha(k.imovelEndereco || k.locadorEndereco, 40)}, pelo período de <b>${esc(r.periodo || '___')}</b>, com entrada em <b>${br(r.data)} às ${esc(r.horaEntrada || '___:___')}</b> e saída em <b>${saida(r) || '____/____/______'}</b>.</p>
+    <p>O LOCADOR cede ao LOCATÁRIO, para uso temporário${r.evento ? ` destinado ao evento <b>${esc(r.evento)}</b>` : ''}, o imóvel denominado <b>${esc(k.nomeEspaco || 'Espaço Veja')}</b>, situado em ${linha(k.imovelEndereco || k.locadorEndereco, 40)}, pelo período de <b>${(+r.dias || 1) > 1 ? `${r.dias} diárias (24 horas cada)` : esc(r.periodo || '___')}</b>, com entrada em <b>${br(r.data)} às ${esc(r.horaEntrada || '___:___')}</b> e saída em <b>${saida(r) || '____/____/______'}</b>.</p>
 
     <h4>CLÁUSULA 2ª – DO VALOR E DO PAGAMENTO</h4>
-    <p>Pela locação, o LOCATÁRIO pagará o valor total de <b>${fmt(total)}</b>, sendo ${fmt(r.valor)} referentes à locação${+r.taxaLimpeza > 0 ? ` e ${fmt(r.taxaLimpeza)} referentes à limpeza pós-evento, contratada pelo LOCATÁRIO` : ', sem contratação da limpeza pós-evento'}. ${pago > 0 ? `Já foi pago o valor de <b>${fmt(pago)}</b>${formas ? ` (${esc(formas)})` : ''}` : 'O pagamento será realizado conforme combinado entre as partes'}${pago > 0 && total - pago > 0 ? `, restando <b>${fmt(total - pago)}</b> a serem quitados até a entrada no imóvel` : pago > 0 ? ', estando o valor integralmente quitado' : ''}.</p>
+    <p>Pela locação, o LOCATÁRIO pagará o valor total de <b>${fmt(total)}</b>, sendo ${fmt(r.valor)} referentes à locação${(+r.dias || 1) > 1 ? ` (${r.dias} diárias)` : ''}${+r.taxaLimpeza > 0 ? ` e ${fmt(r.taxaLimpeza)} referentes à limpeza pós-evento, contratada pelo LOCATÁRIO` : ', sem contratação da limpeza pós-evento'}. ${pago > 0 ? `Já foi pago o valor de <b>${fmt(pago)}</b>${formas ? ` (${esc(formas)})` : ''}` : 'O pagamento será realizado conforme combinado entre as partes'}${pago > 0 && total - pago > 0 ? `, restando <b>${fmt(total - pago)}</b> a serem quitados até a entrada no imóvel` : pago > 0 ? ', estando o valor integralmente quitado' : ''}.</p>
 
     ${clausulas}
 
@@ -112,7 +113,22 @@ export function htmlContrato(r, k, op = {}) {
   </div>`;
 }
 
-// Abre o contrato em tela cheia com botão para salvar em PDF / imprimir
+// Carrega a biblioteca de PDF só quando precisa (arquivo grande)
+let carregandoPdf;
+function carregarHtml2pdf() {
+  if (window.html2pdf) return Promise.resolve();
+  carregandoPdf ||= new Promise((ok, erro) => {
+    const sc = document.createElement('script');
+    sc.src = 'js/vendor/html2pdf.bundle.min.js';
+    sc.onload = ok; sc.onerror = () => { carregandoPdf = null; erro(new Error('Falha ao carregar o gerador de PDF')); };
+    document.head.appendChild(sc);
+  });
+  return carregandoPdf;
+}
+
+const nomeArquivo = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') + '.pdf';
+
+// Abre o contrato em tela cheia com botões para baixar o PDF e imprimir
 export function abrirContrato(html, titulo = 'Contrato de locação') {
   document.getElementById('contrato-vis')?.remove();
   const el = document.createElement('div');
@@ -120,16 +136,40 @@ export function abrirContrato(html, titulo = 'Contrato de locação') {
   el.innerHTML = `
     <div class="contrato-barra">
       <b>${esc(titulo)}</b>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ouro btn-peq" id="contrato-pdf">⬇ Baixar PDF / Imprimir</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ouro btn-peq" id="contrato-pdf">⬇ Baixar PDF</button>
+        <button class="btn btn-claro btn-peq" id="contrato-imprimir">🖨 Imprimir</button>
         <button class="btn btn-claro btn-peq" id="contrato-fechar">Fechar</button>
       </div>
     </div>
     <div class="contrato-scroll">${html}</div>
-    <p class="contrato-dica">No celular: toque em "Baixar PDF", escolha <b>Salvar como PDF</b> (Android) ou <b>Compartilhar › Salvar em Arquivos</b> (iPhone).</p>`;
+    <p class="contrato-dica" id="contrato-msg">O arquivo PDF é salvo na pasta de downloads do seu celular ou computador.</p>`;
   document.body.appendChild(el);
   document.body.classList.add('com-contrato');
   const fechar = () => { el.remove(); document.body.classList.remove('com-contrato'); };
   el.querySelector('#contrato-fechar').onclick = fechar;
-  el.querySelector('#contrato-pdf').onclick = () => { const t = document.title; document.title = titulo; window.print(); document.title = t; };
+  el.querySelector('#contrato-imprimir').onclick = () => { const t = document.title; document.title = titulo; window.print(); document.title = t; };
+  el.querySelector('#contrato-pdf').onclick = async (e) => {
+    const btn = e.currentTarget, msg = el.querySelector('#contrato-msg');
+    btn.disabled = true; btn.textContent = 'Gerando PDF…';
+    try {
+      await carregarHtml2pdf();
+      const doc = el.querySelector('.contrato-doc').cloneNode(true);
+      doc.classList.add('contrato-pdf');
+      doc.querySelector('.contrato-previa')?.setAttribute('data-html2canvas-ignore', 'false');
+      await window.html2pdf().set({
+        margin: [14, 14, 16, 14],
+        filename: nomeArquivo(titulo),
+        image: { type: 'jpeg', quality: 0.96 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['h4', '.contrato-assin', 'p'] }
+      }).from(doc).save();
+      msg.innerHTML = '✅ PDF baixado! Procure na pasta <b>Downloads</b>.';
+    } catch (err) {
+      console.error(err);
+      msg.innerHTML = 'Não foi possível gerar o PDF neste aparelho. Use o botão <b>Imprimir</b> e escolha <b>Salvar como PDF</b>.';
+    }
+    btn.disabled = false; btn.textContent = '⬇ Baixar PDF';
+  };
 }
