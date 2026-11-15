@@ -16,7 +16,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const foneFmt = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d; };
 const ZAP = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z"/></svg>';
 const CADEADO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
-const ST_SOL = { aguardando: ['Aguardando pagamento', 'st-pendente'], informado: ['Pagamento informado', 'st-pendente'], recusada: ['Não aprovada', 'st-cancelada'], expirada: ['Expirada', 'st-cancelada'] };
+const ST_SOL = { cancelada: ['Cancelada', 'st-cancelada'], aguardando: ['Aguardando pagamento', 'st-pendente'], informado: ['Pagamento informado', 'st-pendente'], recusada: ['Não aprovada', 'st-cancelada'], expirada: ['Expirada', 'st-cancelada'] };
 // situação da pré-reserva considerando o prazo de pagamento
 const situacaoSol = (s) => (s.status && s.status !== 'aguardando' ? s.status : s.pagoInformadoEm ? 'informado' : s.expiraEm && Date.now() > s.expiraEm ? 'expirada' : 'aguardando');
 const mmss = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
@@ -511,15 +511,30 @@ function abrirPreReserva(iso, dias = 1) {
         clienteCpf: r.clienteCpf, clienteEndereco: String(r.clienteEndereco || '').slice(0, 150), aceiteContrato: new Date().toISOString()
       };
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Enviando…';
+      const erro = (msg) => { btn.disabled = false; btn.textContent = 'Tentar novamente'; $('#pre-erro', m).textContent = msg; };
+      // 1) confere de novo, direto no banco, se as datas continuam livres (outra pessoa pode ter reservado agora)
       try {
-        const solId = await db.add('solicitacoes', sol);
-        for (const x of datas) { try { await db.set('ocupacao', x, { status: 'pendente', expiraEm: sol.expiraEm, sol: solId }); } catch (e) { console.warn(e); } marcados[x] = 'pendente'; }
-        selecao = { ini: null, fim: null }; desenhar(); $('#sel').innerHTML = '';
-        mostrarConfirmacao(sol, temPix, solId);
+        const atuais = await Promise.all(datas.map((x) => db.get('ocupacao', x)));
+        const ocupada = atuais.find((o) => o && !(o.status === 'pendente' && o.expiraEm && Date.now() > o.expiraEm));
+        if (ocupada) { marcados[ocupada.id] = ocupada.status; desenhar(); return erro(`O dia ${br(ocupada.id)} acabou de ser reservado por outra pessoa. Escolha outras datas.`); }
+      } catch (e) { console.warn(e); }
+      // 2) cria a pré-reserva
+      let solId;
+      try { solId = await db.add('solicitacoes', sol); }
+      catch (err) { console.error(err); return erro(/permission|insufficient/i.test(err.code || err.message) ? 'Os valores ou as regras mudaram enquanto você reservava. Atualize a página (puxe a tela para baixo) e tente de novo.' : 'Não foi possível enviar agora. Tente de novo ou fale pelo WhatsApp.'); }
+      // 3) segura as datas; se alguma foi pega por outra pessoa no mesmo instante, desfaz tudo
+      const seguradas = [];
+      try {
+        for (const x of datas) { await db.set('ocupacao', x, { status: 'pendente', expiraEm: sol.expiraEm, sol: solId }); seguradas.push(x); }
       } catch (err) {
-        console.error(err); btn.disabled = false; btn.textContent = 'Tentar novamente';
-        $('#pre-erro', m).textContent = 'Não foi possível enviar agora. Tente de novo ou fale pelo WhatsApp.';
+        console.warn('conflito de datas', err);
+        for (const x of seguradas) await db.set('ocupacao', x, { status: 'pendente', expiraEm: Date.now() - 1000, sol: solId }).catch(() => {});
+        await db.update('solicitacoes', solId, { status: 'cancelada' }).catch(() => {});
+        return erro('Outra pessoa acabou de reservar uma dessas datas. Nada foi cobrado — escolha outras datas.');
       }
+      datas.forEach((x) => (marcados[x] = 'pendente'));
+      selecao = { ini: null, fim: null }; desenhar(); $('#sel').innerHTML = '';
+      mostrarConfirmacao(sol, temPix, solId);
     };
   });
 }
@@ -540,7 +555,7 @@ function mostrarConfirmacao(sol, temPix, solId) {
   }
   abrirModal('Pré-reserva enviada! 🎉', `
     <div style="text-align:center">
-      <p style="margin-bottom:6px">Código da sua reserva: <b style="color:var(--ouro-esc);font-size:18px">${sol.codigo}</b></p>
+      <p style="margin-bottom:6px">Código da sua reserva: <b style="color:var(--ouro-esc);font-size:18px">${esc(sol.codigo)}</b></p>
       <p style="color:var(--cinza);font-size:14px;margin-bottom:16px">${(+sol.dias || 1) > 1 ? `${br(sol.data)} a ${br(addDias(sol.data, sol.dias - 1))}` : diaExtenso(sol.data)} · ${periodoTxt(sol)} · entrada ${sol.horaEntrada} · total ${fmt(sol.total)}</p>
       ${pixHtml}
       <div class="prazo-pag" id="prazo-box">⏳ Você tem <b id="prazo-tempo">--:--</b> para pagar e tocar em <b>Já paguei</b>. Depois disso a pré-reserva é cancelada automaticamente e ${(+sol.dias || 1) > 1 ? 'as datas voltam' : 'a data volta'} a ficar livre.</div>

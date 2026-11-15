@@ -2,74 +2,95 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ⚠ TROQUE pelo(s) e-mail(s) do PROPRIETÁRIO (quem acessa o painel)
+    // ================= Funções =================
+
+    // PROPRIETÁRIO: e-mail na lista E e-mail confirmado
     function isDono() {
       return request.auth != null
-        && request.auth.token.email in ['devtecnologia6@gmail.com'];
+        && request.auth.token.email in ['devtecnologia6@gmail.com']
+        && request.auth.token.email_verified == true;
     }
     function logado()          { return request.auth != null; }
     function emailConfirmado() { return logado() && request.auth.token.email_verified == true; }
+    function solDoc(id)        { return get(/databases/$(database)/documents/solicitacoes/$(id)).data; }
+    function reservaDoc(id)    { return get(/databases/$(database)/documents/reservas/$(id)).data; }
+    function infoPublica()     { return get(/databases/$(database)/documents/publico/info).data; }
     // conta excluída/bloqueada pelo dono
     function bloqueado() {
       return exists(/databases/$(database)/documents/bloqueados/$(request.auth.uid))
         || exists(/databases/$(database)/documents/bloqueiosEmail/$(request.auth.token.email.lower()));
     }
     function clienteAtivo() { return emailConfirmado() && !bloqueado(); }
+    function clienteOk()    { return isDono() || clienteAtivo(); }
+    function agora()        { return request.time.toMillis(); }
+    function dataValida(s)  { return s is string && s.matches('^20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'); }
+    function diaTs(s)       { return timestamp.date(int(s.split('-')[0]), int(s.split('-')[1]), int(s.split('-')[2])); }
+    // a data está dentro das diárias da pré-reserva?
+    function dentroDaSol(dia, s) {
+      return diaTs(dia) >= diaTs(s.data) && diaTs(dia) < diaTs(s.data) + duration.value(s.get('dias', 1), 'd');
+    }
 
-    match /bloqueados/{uid}      { allow read, write: if isDono(); }
+    // ================= Área do proprietário =================
+    match /bloqueados/{uid}       { allow read, write: if isDono(); }
     match /bloqueiosEmail/{email} { allow read, write: if isDono(); }
+    match /despesas/{id}          { allow read, write: if isDono(); }
+    match /config/{id}            { allow read, write: if isDono(); }
 
-    // ---------- Dados privados do proprietário ----------
-    match /despesas/{id} { allow read, write: if isDono(); }
-    match /config/{id}   { allow read, write: if isDono(); }
-
-    // Reservas: só o dono escreve; o cliente pode LER apenas as reservas ligadas à conta dele
+    // Reservas: só o dono escreve; o cliente LÊ apenas as reservas ligadas à conta dele
     match /reservas/{id} {
       allow write: if isDono();
       allow read:  if isDono() || (logado() && resource.data.clienteUid == request.auth.uid);
     }
 
-    // ---------- Contas de clientes ----------
+    // ================= Contas de clientes =================
     match /clientes/{uid} {
-      allow read:   if isDono() || (logado() && request.auth.uid == uid);
+      allow read: if isDono() || (logado() && request.auth.uid == uid);
       allow create, update: if logado() && request.auth.uid == uid && !bloqueado()
         && request.resource.data.keys().hasOnly(['nome','telefone','cpf','end','endereco','email','criadoEm'])
-        && (!('cpf' in request.resource.data) || request.resource.data.cpf.matches('^[0-9]{11}$'))
-        && (!('endereco' in request.resource.data) || (request.resource.data.endereco is string && request.resource.data.endereco.size() <= 150))
         && request.resource.data.nome is string && request.resource.data.nome.size() >= 3 && request.resource.data.nome.size() <= 80
-        && request.resource.data.telefone is string && request.resource.data.telefone.size() == 11;
+        && request.resource.data.telefone is string && request.resource.data.telefone.matches('^[0-9]{11}$')
+        && (!('cpf' in request.resource.data) || (request.resource.data.cpf is string && request.resource.data.cpf.matches('^[0-9]{11}$')))
+        && (!('endereco' in request.resource.data) || (request.resource.data.endereco is string && request.resource.data.endereco.size() <= 200))
+        && (!('end' in request.resource.data) || request.resource.data.end is map)
+        && (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email);
       allow delete: if isDono();
     }
 
-    // ---------- Área do cliente (só com conta e e-mail confirmado) ----------
-    function clienteOk() { return isDono() || clienteAtivo(); }
+    // ================= Conteúdo da área do cliente (só com conta confirmada) =================
     match /publico/{id}   { allow read: if clienteOk(); allow write: if isDono(); }
     match /fotos/{id}     { allow read: if clienteOk(); allow write: if isDono(); }
     match /fotosFull/{id} { allow read: if clienteOk(); allow write: if isDono(); }
 
-    // Datas ocupadas: só clientes logados leem; e só podem MARCAR uma data livre como "pendente"
-    match /ocupacao/{data} {
+    // ================= Datas ocupadas =================
+    // O cliente só segura datas da PRÓPRIA pré-reserva, dentro das diárias dela e com o mesmo prazo de pagamento.
+    function ocupacaoDoCliente(dia) {
+      let novo = request.resource.data;
+      let s = solDoc(novo.sol);
+      return clienteAtivo()
+        && dataValida(dia)
+        && novo.keys().hasOnly(['status', 'expiraEm', 'sol'])
+        && novo.status == 'pendente'
+        && s.uid == request.auth.uid
+        && s.status == 'aguardando'
+        && dentroDaSol(dia, s)
+        && (('expiraEm' in novo && (novo.expiraEm == s.expiraEm || novo.expiraEm <= agora()))   // prazo normal ou liberação
+            || (!('expiraEm' in novo) && s.get('pagoInformadoEm', null) != null));            // "Já paguei"
+    }
+    match /ocupacao/{dia} {
       allow read: if clienteOk();
-      // cliente segura a data para a PRÓPRIA pré-reserva (com prazo de pagamento)
-      allow create: if isDono()
-        || (clienteAtivo()
-            && data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-            && request.resource.data.keys().hasOnly(['status', 'expiraEm', 'sol'])
-            && request.resource.data.status == 'pendente'
-            && get(/databases/$(database)/documents/solicitacoes/$(request.resource.data.sol)).data.uid == request.auth.uid);
-      // atualizar: a própria pré-reserva (ex.: "Já paguei") ou ocupar uma data cujo prazo de pagamento expirou
-      allow update: if isDono()
-        || (clienteAtivo()
-            && request.resource.data.keys().hasOnly(['status', 'expiraEm', 'sol'])
-            && request.resource.data.status == 'pendente'
-            && get(/databases/$(database)/documents/solicitacoes/$(request.resource.data.sol)).data.uid == request.auth.uid
-            && resource.data.status == 'pendente'
-            && (get(/databases/$(database)/documents/solicitacoes/$(resource.data.sol)).data.uid == request.auth.uid
-                || resource.data.expiraEm < request.time.toMillis()));
+      allow create: if isDono() || ocupacaoDoCliente(dia);
+      // atualizar só se a data for da própria pré-reserva ou se o prazo de pagamento de outra pessoa já expirou
+      allow update: if isDono() || (
+        ocupacaoDoCliente(dia)
+        && resource.data.status == 'pendente'
+        && (solDoc(resource.data.sol).uid == request.auth.uid
+            || ('expiraEm' in resource.data && resource.data.expiraEm < agora()))
+      );
       allow delete: if isDono();
     }
 
-    // Pedidos de cancelamento: o cliente só consegue pedir para a PRÓPRIA reserva e DENTRO do prazo (7 dias após a confirmação)
+    // ================= Pedidos de cancelamento =================
+    // Só para a PRÓPRIA reserva e DENTRO do prazo (7 dias após a confirmação)
     match /cancelamentos/{rid} {
       allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
       allow update, delete: if isDono();
@@ -80,41 +101,61 @@ service cloud.firestore {
         && request.resource.data.status == 'pendente'
         && request.resource.data.keys().hasOnly(['uid','reservaId','cliente','data','motivo','status','criadoEm'])
         && request.resource.data.motivo is string && request.resource.data.motivo.size() <= 300
-        && get(/databases/$(database)/documents/reservas/$(rid)).data.clienteUid == request.auth.uid
-        && request.time.toMillis() <= get(/databases/$(database)/documents/reservas/$(rid)).data.prazoCancelamento
+        && reservaDoc(rid).clienteUid == request.auth.uid
+        && agora() <= reservaDoc(rid).prazoCancelamento
       );
     }
 
-    // Pré-reservas: cliente com e-mail confirmado cria em nome dele mesmo e lê só as dele
+    // ================= Pré-reservas =================
+    // Valores conferidos com os preços publicados pelo dono (o cliente não consegue alterar preço nem sinal)
+    function precosOk(d) {
+      let info = infoPublica();
+      let dias = d.get('dias', 1);
+      let pct = info.get('sinalPct', 100);
+      return info.get('preReserva', true) == true
+        && d.valor == (dias > 1 ? info.preco24 * dias : (d.periodo == '12h' ? info.preco12 : info.preco24))
+        && (d.taxaLimpeza == 0 || d.taxaLimpeza == info.taxaLimpeza)
+        && d.total == d.valor + d.taxaLimpeza
+        && ((d.sinal == 0 && info.get('pix', null) == null)
+            || (d.sinal >= d.total * pct / 100 - 0.01 && d.sinal <= d.total))
+        && d.expiraEm <= agora() + (info.get('prazoPagamentoMin', 30) + 2) * 60000;
+    }
     match /solicitacoes/{id} {
       allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
       allow delete: if isDono();
-      // cliente só pode marcar "Já paguei" na própria pré-reserva e dentro do prazo
+      // cliente: marcar "Já paguei" dentro do prazo, ou cancelar a própria pré-reserva enquanto aguarda
       allow update: if isDono() || (
         clienteAtivo()
         && resource.data.uid == request.auth.uid
         && resource.data.status == 'aguardando'
-        && request.time.toMillis() <= resource.data.expiraEm
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pagoInformadoEm'])
+        && (
+          (agora() <= resource.data.expiraEm
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pagoInformadoEm']))
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status == 'cancelada')
+        )
       );
       allow create: if isDono() || (
         clienteAtivo()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == 'aguardando'
-        && request.resource.data.expiraEm is int
-        && request.resource.data.expiraEm <= request.time.toMillis() + 86400000
         && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','expiraEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato'])
         && request.resource.data.cliente is string && request.resource.data.cliente.size() >= 3 && request.resource.data.cliente.size() <= 80
-        && request.resource.data.telefone is string && request.resource.data.telefone.size() == 11
-        && request.resource.data.data is string && request.resource.data.data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.telefone is string && request.resource.data.telefone.matches('^[0-9]{11}$')
+        && dataValida(request.resource.data.data)
+        && diaTs(request.resource.data.data) >= request.time - duration.value(1, 'd')
         && request.resource.data.periodo in ['12h', '24h']
         && (!('dias' in request.resource.data) || (request.resource.data.dias is int && request.resource.data.dias >= 1 && request.resource.data.dias <= 30))
-        && request.resource.data.horaEntrada is string && request.resource.data.horaEntrada.matches('^[0-2][0-9]:[0-5][0-9]$')
+        && request.resource.data.horaEntrada is string && request.resource.data.horaEntrada.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
         && request.resource.data.evento is string && request.resource.data.evento.size() <= 60
         && request.resource.data.obs is string && request.resource.data.obs.size() <= 400
         && request.resource.data.codigo is string && request.resource.data.codigo.size() <= 12
-        && (!('clienteCpf' in request.resource.data) || request.resource.data.clienteCpf.matches('^[0-9]{11}$'))
+        && request.resource.data.valor is number && request.resource.data.total is number && request.resource.data.sinal is number && request.resource.data.taxaLimpeza is number
+        && request.resource.data.expiraEm is int
+        && (!('clienteCpf' in request.resource.data) || (request.resource.data.clienteCpf is string && request.resource.data.clienteCpf.matches('^[0-9]{11}$')))
+        && (!('clienteEndereco' in request.resource.data) || (request.resource.data.clienteEndereco is string && request.resource.data.clienteEndereco.size() <= 200))
+        && precosOk(request.resource.data)
       );
     }
   }

@@ -19,9 +19,10 @@ const mesChave = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
 const nomeMes = (d) => `${MESES[d.getMonth()]} de ${d.getFullYear()}`;
 const soDigitos = (s) => String(s || '').replace(/\D/g, '');
 const foneBR = (s) => { const d = soDigitos(s); return d.length >= 12 ? d : '55' + d; };
-const foneFmt = (s) => { const d = soDigitos(s).replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length === 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : s || '—'; };
+const foneFmt = (s) => { const d = soDigitos(s).replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length === 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : d || '—'; };
 
 function toast(msg) {
+  document.querySelectorAll('.toast').forEach((x) => x.remove());
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg;
   document.body.appendChild(t);
@@ -97,7 +98,7 @@ async function carregar() {
   state.cancelamentos = canc.filter((x) => x.status === 'pendente');
   state.reservas = reservas;
   const expiradas = sols.filter((x) => (!x.status || x.status === 'aguardando') && !x.pagoInformadoEm && x.expiraEm && Date.now() > x.expiraEm);
-  state.solicitacoes = sols.filter((x) => !['recusada', 'expirada'].includes(x.status) && !expiradas.includes(x)).sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  state.solicitacoes = sols.filter((x) => !['recusada', 'expirada', 'cancelada'].includes(x.status) && !expiradas.includes(x)).sort((a, b) => String(a.data).localeCompare(String(b.data)));
   state._expiradas = expiradas;
   state.despesas = despesas;
   state.config = { ...CONFIG_PADRAO, ...(cfg || {}) };
@@ -176,7 +177,7 @@ function renderInicio(el) {
   const aReceber = state.reservas.filter((r) => ['pendente', 'confirmada'].includes(r.status) && r.data >= hoje()).reduce((s, r) => s + calc(r).falta, 0);
   const proximas = state.reservas.filter((r) => ['pendente', 'confirmada'].includes(r.status) && r.data >= hoje()).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 5);
 
-  el.innerHTML = blocoCancelamentos() + blocoSolicitacoes() + `
+  el.innerHTML = '<div id="chk-aviso"></div>' + blocoCancelamentos() + blocoSolicitacoes() + `
     <div class="banner" style="background-image:url('assets/banner.jpg')">
       <img src="assets/logo.png" class="logo-img banner-logo" alt="">
       <div><div class="titulo">${esc(state.config.nome)}</div><div class="lema">Conforto &amp; Lazer</div></div>
@@ -225,6 +226,13 @@ function renderInicio(el) {
   desenhar();
   ligarItens(el);
   ligarSolicitacoes(el); ligarCancelamentos(el);
+  verificarSistema().then((itens) => {
+    const pend = itens.filter((i) => !i.ok);
+    if (!pend.length || !$('#chk-aviso')) return;
+    $('#chk-aviso').innerHTML = `<div class="card" style="margin-bottom:18px;border-color:#f0d9a8;background:var(--laranja-bg);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div><b>⚙️ Configuração: ${itens.length - pend.length} de ${itens.length} itens prontos</b><br><small style="color:#7a4d05">Falta: ${pend.map((i) => esc(i.t)).join(', ')}</small></div>
+      <a href="#config" class="btn btn-ouro btn-peq">Ver checklist</a></div>`;
+  });
 }
 
 function blocoSolicitacoes() {
@@ -823,12 +831,48 @@ async function renderFotos(el) {
   desenhar();
 }
 
+// ---------------------------------------------------------------- CHECKLIST DO SISTEMA
+async function verificarSistema() {
+  const c = state.config;
+  const [pub, fotos] = await Promise.all([db.get('publico', 'info').catch(() => null), db.list('fotos').catch(() => [])]);
+  const horariosOk = String(c.horarios || '').split(/[,;\s]+/).filter(Boolean).every((h) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(h));
+  const publicado = pub && +pub.preco24 === +c.preco24 && +pub.preco12 === +c.preco12 && +pub.taxaLimpeza === +c.taxaLimpeza && (pub.pix?.chave || '') === (c.pixChave || '');
+  const https = db.modoDemo || location.protocol === 'https:';
+  return [
+    { ok: soDigitos(c.whatsapp).length === 11, t: 'WhatsApp para reservas', d: 'Número que recebe os clientes do site', ir: 'config' },
+    { ok: !!(c.pixChave && c.pixNome && c.pixCidade), t: 'Pix configurado', d: 'Chave, nome do recebedor e cidade (teste o QR Code)', ir: 'config' },
+    { ok: +c.preco12 > 0 && +c.preco24 > 0, t: 'Preços de 12h e 24h', d: `12h ${fmt(c.preco12)} · 24h ${fmt(c.preco24)} · limpeza ${fmt(c.taxaLimpeza)}`, ir: 'config' },
+    { ok: horariosOk, t: 'Horários de entrada', d: c.horarios || '—', ir: 'config' },
+    { ok: !!String(c.regras || '').trim(), t: 'Regras do espaço', d: 'Texto que o cliente aceita na pré-reserva', ir: 'config' },
+    { ok: !!(c.locadorNome && cpfValido(c.locadorCpf) && c.locadorEndereco), t: 'Dados do contrato', d: 'Seu nome completo, CPF e endereço', ir: 'config' },
+    { ok: !!c.assinatura, t: 'Assinatura no contrato', d: 'Foto da sua assinatura', ir: 'config' },
+    { ok: fotos.length >= 3, t: 'Fotos da casa', d: `${fotos.length} foto(s) — recomendado pelo menos 3`, ir: 'fotos' },
+    { ok: !!publicado, t: 'Informações publicadas para os clientes', d: publicado ? 'Preços, Pix e regras atualizados no site' : 'Clique em Salvar configurações para atualizar o site', ir: 'config' },
+    { ok: !!db.dominioOficial, t: 'Proteção contra site falso', d: db.dominioOficial || 'Defina o dominioOficial no firebase-config.js' },
+    { ok: https, t: 'Conexão segura (cadeado HTTPS)', d: https ? 'Site aberto com HTTPS' : 'Marque "Enforce HTTPS" no GitHub Pages' },
+    { ok: true, t: 'E-mail do administrador confirmado', d: 'Acesso ao painel protegido' }
+  ];
+}
+
+function htmlChecklist(itens) {
+  const ok = itens.filter((i) => i.ok).length;
+  return `<div class="card checklist">
+    <div class="card-topo"><div><h3>✅ Checklist do sistema</h3><small style="color:var(--cinza)">${ok} de ${itens.length} itens prontos</small></div>
+      <div class="barra-trilho" style="width:160px"><div class="barra-cheia" style="width:${(ok / itens.length) * 100}%"></div></div></div>
+    ${itens.map((i) => `<div class="chk-item ${i.ok ? 'ok' : 'pend'}"><span>${i.ok ? '✔' : '!'}</span>
+      <div><b>${esc(i.t)}</b><small>${esc(i.d)}</small></div>
+      ${!i.ok && i.ir ? `<a href="#${i.ir}" class="btn btn-claro btn-peq">Resolver</a>` : ''}</div>`).join('')}
+    <p style="font-size:12.5px;color:var(--cinza);margin-top:12px">Lembrete no WhatsApp: teste em GitHub → Actions → "Lembrete de locação" → Run workflow.</p>
+  </div>`;
+}
+
 // ---------------------------------------------------------------- CONFIG
 function renderConfig(el) {
   const c = state.config;
+  setTimeout(async () => { const box = $('#chk-box'); if (box) box.innerHTML = htmlChecklist(await verificarSistema()); }, 0);
   const linkPublico = new URL('./', location.href).href.split('#')[0];
   const tipos = { celular: 'Celular', cpf: 'CPF / CNPJ', email: 'E-mail', aleatoria: 'Chave aleatória' };
-  el.innerHTML = `
+  el.innerHTML = `<div id="chk-box" style="margin-bottom:18px"></div>
     <form id="form-cfg">
     <div class="duas-col">
       <div style="display:grid;gap:18px;align-content:start">
@@ -959,6 +1003,7 @@ function renderConfig(el) {
     });
     state.config = cfg; $('#nome-espaco').textContent = cfg.nome;
     toast('Configurações salvas!');
+    const box = $('#chk-box'); if (box) box.innerHTML = htmlChecklist(await verificarSistema());
   };
 }
 
@@ -988,19 +1033,44 @@ async function iniciar() {
     if (!user) { $('#tela-app').classList.add('oculto'); $('#tela-login').classList.remove('oculto'); return; }
     $('#tela-login').classList.add('oculto');
     $('#usuario-email').textContent = user.email;
+    // o administrador precisa ter o e-mail confirmado (proteção extra do painel)
+    if (!user.emailVerified) { $('#tela-app').classList.remove('oculto'); return mostrarVerificacaoDono(user); }
     try { await carregar(); }
     catch (err) {
       console.error(err);
       $('#tela-app').classList.remove('oculto');
       const negado = /permission|insufficient/i.test(err.code || err.message);
       $('#conteudo').innerHTML = negado
-        ? `<div class="card"><h3>🔒 Acesso restrito</h3><p style="margin-top:8px;color:var(--cinza)">A conta <b>${esc(user.email)}</b> não tem permissão para acessar o painel do proprietário.<br><br>Se você é cliente, use o <a href="./">site de reservas</a>. Se você é o dono, confira se este e-mail está nas regras do Firestore (veja o README).</p><button class="btn btn-claro" style="margin-top:14px" onclick="document.getElementById('btn-sair').click()">Sair desta conta</button></div>`
-        : `<div class="card"><h3>Não foi possível carregar os dados</h3><p style="margin-top:8px;color:var(--cinza)">${esc(err.message)}</p></div>`;
+        ? `<div class="card"><h3>🔒 Acesso restrito</h3><p style="margin-top:8px;color:var(--cinza)">A conta <b>${esc(user.email)}</b> não tem permissão para acessar o painel do proprietário.<br><br>Se você é cliente, use o <a href="./">site de reservas</a>. Se você é o dono, confira se este e-mail está nas regras do Firestore (veja o README).</p><button class="btn btn-claro" style="margin-top:14px" id="sair-restrito">Sair desta conta</button></div>`
+        : `<div class="card"><h3>Não foi possível carregar os dados</h3><p style="margin-top:8px;color:var(--cinza)">${esc(err.message)}</p><button class="btn btn-claro" style="margin-top:14px" id="sair-restrito">Sair</button></div>`;
+      $('#sair-restrito').onclick = () => db.logout();
       return;
     }
     $('#tela-app').classList.remove('oculto');
     rota();
   });
+}
+
+function mostrarVerificacaoDono(user) {
+  $('#conteudo').innerHTML = `<div class="card" style="max-width:560px">
+    <h3>🔐 Confirme o e-mail do administrador</h3>
+    <p style="margin-top:10px;color:var(--cinza);line-height:1.5">Por segurança, o painel só abre depois que o e-mail <b>${esc(user.email)}</b> for confirmado. Isso é feito uma única vez.</p>
+    <ol style="margin:14px 0 0 18px;color:var(--cinza);line-height:1.7"><li>Clique em <b>Enviar e-mail de confirmação</b>.</li><li>Abra o e-mail (olhe também no spam) e clique no link.</li><li>Volte aqui e clique em <b>Já confirmei</b>.</li></ol>
+    <div class="erro" id="ver-msg" style="margin-top:10px"></div>
+    <div class="modal-acoes" style="justify-content:flex-start">
+      <button class="btn btn-ouro" id="ver-enviar">Enviar e-mail de confirmação</button>
+      <button class="btn btn-claro" id="ver-ok">Já confirmei</button>
+      <button class="btn btn-claro" id="ver-sair">Sair</button>
+    </div></div>`;
+  $('#ver-sair').onclick = () => db.logout();
+  $('#ver-enviar').onclick = async (e) => {
+    try { await db.clienteReenviarConfirmacao(); e.target.textContent = 'E-mail enviado ✓'; e.target.disabled = true; $('#ver-msg').innerHTML = '<span style="color:var(--verde)">Enviado! Confira sua caixa de entrada e o spam.</span>'; }
+    catch (err) { $('#ver-msg').textContent = /too-many/i.test(err.code) ? 'Muitas tentativas. Aguarde alguns minutos.' : 'Não foi possível enviar: ' + (err.code || err.message); }
+  };
+  $('#ver-ok').onclick = async () => {
+    if (await db.clienteVerificarEmail()) { location.reload(); }
+    else $('#ver-msg').textContent = 'Ainda não identificamos a confirmação. Clique no link do e-mail e tente de novo.';
+  };
 }
 
 iniciar();
