@@ -49,3 +49,13 @@ export function saidaDate(r) {
   d.setHours(h + horas, m);
   return d;
 }
+
+// "entrada 16/11 às 08:00 · saída 19/11 às 08:00"
+export function entradaSaidaTxt(r) {
+  const s = saidaDate(r);
+  if (!s) return r?.horaEntrada ? 'entrada ' + r.horaEntrada : '';
+  const dd = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const hh = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const e = new Date(`${r.data}T${r.horaEntrada}:00`);
+  return `entrada ${dd(e)} às ${hh(e)} · saída ${dd(s)} às ${hh(s)}`;
+}

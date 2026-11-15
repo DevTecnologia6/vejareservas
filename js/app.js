@@ -3,7 +3,7 @@
 // =====================================================================
 import * as db from './db.js';
 import './limites.js';
-import { renderCalendario, MESES, toISO, addDias, datasDe, periodoTxt, saidaDate } from './calendar.js';
+import { renderCalendario, MESES, toISO, addDias, datasDe, periodoTxt, saidaDate, entradaSaidaTxt } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { comprimir, abrirVisualizador } from './fotos.js';
 import { htmlContrato, abrirContrato, CLAUSULAS_PADRAO, cpfFmt, cpfMascarado, cpfValido } from './contrato.js';
@@ -242,7 +242,7 @@ function blocoSolicitacoes() {
     <div class="lista-res">${state.solicitacoes.map((x) => `
       <div class="item-res">
         <div class="ico">${ICO.cal}</div>
-        <div class="meio"><b>${esc(x.cliente)}</b><small>${datasTxt(x)} — ${esc(x.evento || 'Evento')} · ${periodoTxt(x)}${x.horaEntrada ? ' · entrada ' + x.horaEntrada : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
+        <div class="meio"><b>${esc(x.cliente)}</b><small>${datasTxt(x)} — ${esc(x.evento || 'Evento')} · ${periodoTxt(x)}${x.horaEntrada ? ' · ' + entradaSaidaTxt(x) : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
           <small style="display:block;margin:2px 0">${x.pagoInformadoEm ? '<span class="selo st-confirmada">💰 Cliente informou o pagamento — confira o Pix</span>' : x.expiraEm ? `<span class="selo st-pendente">⏳ Aguardando pagamento · expira às ${new Date(x.expiraEm).toTimeString().slice(0, 5)}</span>` : ''}</small>
           <small style="display:block">${foneFmt(x.telefone)}${x.email ? ` · ${esc(x.email)}` : ''}${x.sinal ? ` · sinal via Pix: ${fmt(x.sinal)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small></div>
         <div class="dir"><b style="margin:0 0 8px">${fmt(x.total)}</b><div class="acoes">
@@ -490,13 +490,13 @@ function abrirDetalhe(id) {
   if (!r) return;
   const c = calc(r);
   const saida = (() => { const dt = saidaDate(r); return dt ? fmtDataHora(dt.getTime()) : ''; })();
-  const msgCliente = encodeURIComponent(`Olá, ${r.cliente.split(' ')[0]}! Aqui é do ${state.config.nome}. Sobre a sua reserva de ${datasTxt(r)} (${periodoTxt(r)}, entrada às ${r.horaEntrada})` + (c.falta > 0 ? `, fica um saldo de ${fmt(c.falta)} a acertar.` : '. Está tudo certo! 😊'));
+  const msgCliente = encodeURIComponent(`Olá, ${r.cliente.split(' ')[0]}! Aqui é do ${state.config.nome}. Sobre a sua reserva de ${datasTxt(r)} (${periodoTxt(r)}, ${entradaSaidaTxt(r)})` + (c.falta > 0 ? `, fica um saldo de ${fmt(c.falta)} a acertar.` : '. Está tudo certo! 😊'));
 
   abrirModal(esc(r.cliente), `
     <div style="margin-bottom:14px">${selo(r.status)} <small style="color:var(--cinza);margin-left:6px">${STATUS[r.status]?.ajuda || ''}</small></div>
     <div class="det-grade">
       <div><small>Data${(+r.dias || 1) > 1 ? 's' : ''}</small><b>${datasTxt(r)}</b></div>
-      <div><small>Período</small><b>${periodoTxt(r)} · entrada ${r.horaEntrada || '—'}</b></div>
+      <div><small>Período</small><b>${periodoTxt(r)}${r.horaEntrada ? ' · ' + entradaSaidaTxt(r) : ''}</b></div>
       <div><small>Saída prevista</small><b>${saida || '—'}</b></div>
       ${r.prazoCancelamento ? `<div><small>Cliente pode cancelar até</small><b class="${Date.now() > r.prazoCancelamento ? 'negativo' : ''}">${fmtDataHora(r.prazoCancelamento)}${Date.now() > r.prazoCancelamento ? ' (encerrado)' : ''}</b></div>` : ''}
       <div><small>Evento</small><b>${esc(r.evento || '—')}</b></div>
@@ -884,8 +884,8 @@ function renderConfig(el) {
             <label class="campo">Preço 24 horas (R$)<input type="number" step="0.01" name="preco24" value="${c.preco24}"></label>
             <label class="campo">Taxa de limpeza (R$)<input type="number" step="0.01" name="taxaLimpeza" value="${c.taxaLimpeza}"></label>
             <label class="campo">Horário padrão de entrada<input type="time" name="horaEntrada" value="${esc(c.horaEntrada)}"></label>
-            <label class="campo inteiro">Horários de entrada que o cliente pode escolher<input name="horarios" value="${esc(c.horarios)}" placeholder="08:00, 09:00, 10:00">
-              <small style="font-weight:400">Separe por vírgula. A saída é calculada sozinha (12h ou 24h depois).</small></label>
+            <label class="campo inteiro">Horários de entrada que o cliente pode escolher<input name="horarios" value="${esc(c.horarios)}" placeholder="08:00">
+              <small style="font-weight:400">Coloque <b>um só horário</b> (ex.: 08:00) para o horário ser fixo — o cliente não escolhe. Ou vários separados por vírgula. A saída é calculada sozinha: 12h → 12 horas depois; 24h → mesmo horário no dia seguinte; várias diárias → mesmo horário no dia seguinte à última diária.</small></label>
             <label class="campo inteiro">WhatsApp para reservas (com DDD)<input name="whatsapp" inputmode="tel" placeholder="(27) 99999-9999" value="${esc(c.whatsapp ? foneFmt(c.whatsapp) : '')}">
               <small style="font-weight:400">Os clientes do calendário público falam com você por este número.</small></label>
           </div>
@@ -1013,6 +1013,7 @@ function renderConfig(el) {
     const hs = cfg.horarios.split(/[,;\s]+/).filter(Boolean);
     if (!hs.length || hs.some((h) => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(h))) return toast('Horários de entrada inválidos. Use o formato 08:00, 09:00, 14:30.');
     cfg.horarios = hs.map((h) => h.padStart(5, '0')).join(', ');
+    if (hs.length === 1) cfg.horaEntrada = hs[0].padStart(5, '0'); // horário fixo
     if (cfg.whatsapp && cfg.whatsapp.length !== 11) return toast('WhatsApp deve ter DDD + 9 dígitos (11 números).');
     await db.set('config', 'geral', cfg);
     // dados que o calendário público pode ver
