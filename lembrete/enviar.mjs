@@ -89,7 +89,7 @@ for (const r of reservas) {
     `💰 *Total:* ${fmt(total)} | recebido ${fmt(recebido)}`,
     falta > 0 ? `⚠️ *Falta receber:* ${fmt(falta)}` : `✅ *Pagamento completo*`,
     r.status === 'pendente' ? `❗ Reserva ainda está como *PENDENTE*` : null,
-    r.obs ? `📝 ${r.obs}` : null
+    r.obs ? `📝 *Obs.:* ${r.obs}` : null
   ].filter((l) => l !== null).join('\n');
 
   await enviarWhatsApp(msg);
