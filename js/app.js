@@ -90,7 +90,7 @@ function calc(r) {
 }
 
 async function carregar() {
-  const [reservas, despesas, cfg, sols, canc] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes'), db.list('cancelamentos')]);
+  const [reservas, despesas, cfg, sols, canc] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes').catch(() => []), db.list('cancelamentos').catch(() => [])]);
   state.cancelamentos = canc.filter((x) => x.status === 'pendente');
   state.reservas = reservas;
   state.solicitacoes = sols.filter((x) => x.status !== 'recusada').sort((a, b) => String(a.data).localeCompare(String(b.data)));
