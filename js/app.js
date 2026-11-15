@@ -915,6 +915,11 @@ function renderConfig(el) {
           <div style="margin-top:12px"><button type="button" class="btn btn-claro btn-peq" id="testar-pix">Testar QR Code (R$ 1,00)</button></div>
         </div>
         <div class="card">
+          <div class="card-topo"><h3>🔐 Segurança do acesso</h3></div>
+          <p style="color:var(--cinza);font-size:14px;line-height:1.5">Hoje dá para entrar no painel com a <b>senha</b> ou com o <b>link no e-mail</b>. Desligando o login por senha, um aparelho novo só entra pelo link enviado para <b>${esc(state.usuarioEmail || '')}</b>. Os aparelhos onde você já está conectado continuam funcionando.</p>
+          <div class="modal-acoes" style="justify-content:flex-start"><button type="button" class="btn btn-perigo btn-peq" id="travar-senha">Desligar login por senha</button></div>
+        </div>
+        <div class="card">
           <div class="card-topo"><h3>📄 Contrato</h3><button type="button" class="btn btn-claro btn-peq" id="ver-modelo">Ver modelo</button></div>
           <p style="color:var(--cinza);font-size:14px;margin-bottom:12px">Esses dados ficam só no seu painel (não vão para o GitHub). O cliente vê o contrato completo apenas depois que o pagamento for confirmado.</p>
           <div class="grade-form">
@@ -949,6 +954,11 @@ function renderConfig(el) {
     </div>
     <div class="modal-acoes" style="position:sticky;bottom:12px"><button class="btn btn-ouro" style="padding:14px 28px">Salvar configurações</button></div>
     </form>`;
+  $('#travar-senha').onclick = async (e) => {
+    if (!confirm('Desligar o login por senha? A partir de agora, para entrar em um aparelho novo você vai receber um link no e-mail. Este aparelho continua conectado.')) return;
+    try { await db.desligarLoginPorSenha(); toast('Pronto! Novos aparelhos só entram pelo link no e-mail.'); e.target.disabled = true; e.target.textContent = 'Login por senha desligado ✓'; }
+    catch (err) { console.error(err); toast(/requires-recent-login/.test(err.code) ? 'Por segurança, saia e entre de novo pelo link do e-mail e repita.' : 'Não foi possível: ' + (err.code || err.message)); }
+  };
   $('#copiar').onclick = async () => { try { await navigator.clipboard.writeText(linkPublico); toast('Link copiado!'); } catch { toast('Copie o link manualmente.'); } };
   $('#backup').onclick = () => {
     const blob = new Blob([JSON.stringify({ exportadoEm: new Date().toISOString(), config: state.config, reservas: state.reservas, despesas: state.despesas, solicitacoes: state.solicitacoes }, null, 2)], { type: 'application/json' });
@@ -1016,6 +1026,36 @@ async function iniciar() {
   window.addEventListener('hashchange', rota);
   $('#btn-sair').onclick = () => db.logout();
 
+  // ----- acesso por link no e-mail
+  const mostrarForm = (id) => ['#form-link', '#form-login', '#link-enviado', '#form-confirmar-link'].forEach((f) => $(f).classList.toggle('oculto', f !== id));
+  $('#usar-senha').onclick = () => mostrarForm('#form-login');
+  $('#usar-link').onclick = () => mostrarForm('#form-link');
+  $('#link-voltar').onclick = () => mostrarForm('#form-link');
+  $('#form-link').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = $('#link-email').value.trim(), btn = $('#form-link button[type=submit]');
+    $('#link-erro').textContent = ''; btn.disabled = true; btn.textContent = 'Enviando…';
+    try {
+      await db.enviarLinkAcesso(email);
+      if (db.modoDemo) { await db.login(email, ''); return; }
+      $('#link-para').textContent = email; mostrarForm('#link-enviado');
+    } catch (err) {
+      console.error(err);
+      $('#link-erro').textContent = /operation-not-allowed/.test(err.code) ? 'O login por link ainda não foi ativado no Firebase (veja as instruções).' : /too-many/.test(err.code) ? 'Muitas tentativas. Aguarde alguns minutos.' : 'Não foi possível enviar: ' + (err.code || err.message);
+    }
+    btn.disabled = false; btn.textContent = '📧 Receber link de acesso';
+  };
+  const concluir = async (email, erroEl) => {
+    try { await db.concluirLinkAcesso(email); }
+    catch (err) { console.error(err); erroEl.textContent = /invalid-action-code|expired/.test(err.code) ? 'Este link expirou ou já foi usado. Peça um novo.' : /invalid-email/.test(err.code) ? 'O e-mail não confere com o do link.' : 'Não foi possível entrar: ' + (err.code || err.message); mostrarForm(erroEl.id === 'conf-link-erro' ? '#form-confirmar-link' : '#form-link'); }
+  };
+  if (await db.ehLinkDeAcesso()) {
+    const email = db.emailDoLink();
+    if (email) await concluir(email, $('#link-erro'));
+    else { mostrarForm('#form-confirmar-link'); $('#tela-login').classList.remove('oculto'); }
+    $('#form-confirmar-link').onsubmit = (e) => { e.preventDefault(); concluir($('#conf-link-email').value.trim(), $('#conf-link-erro')); };
+  }
+
   $('#esqueci-admin').onclick = async () => {
     const email = $('#login-email').value.trim();
     if (!email) return ($('#login-erro').textContent = 'Digite seu e-mail acima primeiro.');
@@ -1033,6 +1073,7 @@ async function iniciar() {
     if (!user) { $('#tela-app').classList.add('oculto'); $('#tela-login').classList.remove('oculto'); return; }
     $('#tela-login').classList.add('oculto');
     $('#usuario-email').textContent = user.email;
+    state.usuarioEmail = user.email;
     // o administrador precisa ter o e-mail confirmado (proteção extra do painel)
     if (!user.emailVerified) { $('#tela-app').classList.remove('oculto'); return mostrarVerificacaoDono(user); }
     try { await carregar(); }
