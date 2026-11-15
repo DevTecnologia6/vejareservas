@@ -52,6 +52,35 @@ export async function login(email, senha) {
   await au.signInWithEmailAndPassword(fauth, email, senha);
 }
 
+// ---------------------------------------------------------------- acesso do admin por LINK no e-mail
+const CHAVE_LINK = 'vejareservas_email_link';
+export async function enviarLinkAcesso(email) {
+  localStorage.setItem(CHAVE_LINK, email);
+  if (modoDemo) return;
+  await initFirebase();
+  au.useDeviceLanguage(fauth);
+  await au.sendSignInLinkToEmail(fauth, email, { url: location.origin + location.pathname, handleCodeInApp: true });
+}
+export async function ehLinkDeAcesso() {
+  if (modoDemo) return false;
+  await initFirebase();
+  return au.isSignInWithEmailLink(fauth, location.href);
+}
+export const emailDoLink = () => localStorage.getItem(CHAVE_LINK) || '';
+export async function concluirLinkAcesso(email) {
+  await initFirebase();
+  await au.signInWithEmailLink(fauth, email, location.href);
+  localStorage.removeItem(CHAVE_LINK);
+  history.replaceState(null, '', location.pathname);
+}
+// troca a senha por uma aleatória que ninguém conhece: a partir daí só se entra pelo link do e-mail
+export async function desligarLoginPorSenha() {
+  if (modoDemo) return;
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const aleatoria = btoa(String.fromCharCode(...bytes)) + 'Aa1!';
+  await au.updatePassword(fauth.currentUser, aleatoria);
+}
+
 export async function recuperarSenha(email) {
   if (modoDemo) return;
   await initFirebase();
