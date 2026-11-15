@@ -90,6 +90,15 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - Depois do prazo o botão some e aparece "Prazo de cancelamento encerrado". As regras do Firestore também bloqueiam pedidos fora do prazo.
 - Reembolso, quando houver, é feito por você pelo banco. O prazo aparece no detalhe de cada reserva no painel.
 
+## 5.0.1 Contrato de locação
+
+- Em **Ajustes → Contrato** preencha **seu nome completo, CPF, endereço, foro** e envie a **foto da sua assinatura** (papel branco, caneta escura). As **cláusulas** (limpeza, uso do espaço, piscina, utensílios, vistoria, desistência, horário) vêm prontas e podem ser editadas. Use **Ver modelo** para conferir.
+- Esses dados ficam só no Firestore (área do dono); **não vão para o GitHub**.
+- O cliente informa **CPF e endereço** no cadastro e **aceita o contrato** na pré-reserva (pode ler uma prévia, com o seu CPF mascarado).
+- Quando a reserva fica **Confirmada** (pagamento recebido), o contrato é gerado com os dados dos dois e a data/hora do aceite eletrônico. O cliente baixa em **Minhas reservas → Baixar contrato** (PDF); você baixa no detalhe da reserva → **📄 Contrato**.
+- Reservas cadastradas por você mesmo também geram contrato: preencha CPF e endereço do cliente no formulário.
+- Para validade jurídica ainda maior, você pode assinar o PDF gratuitamente pelo **assinador do gov.br**.
+
 ## 5.1 Horários e fotos
 
 - **Horário de entrada**: em *Ajustes*, defina os horários que o cliente pode escolher (ex.: `08:00, 09:00, 10:00, 12:00, 14:00`). Na pré-reserva ele escolhe um deles e o sistema mostra a **saída prevista** (12h ou 24h depois). No painel você pode digitar qualquer horário ao cadastrar ou editar.

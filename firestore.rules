@@ -24,7 +24,9 @@ service cloud.firestore {
     match /clientes/{uid} {
       allow read:   if isDono() || (logado() && request.auth.uid == uid);
       allow create, update: if logado() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['nome','telefone','email','criadoEm'])
+        && request.resource.data.keys().hasOnly(['nome','telefone','cpf','endereco','email','criadoEm'])
+        && (!('cpf' in request.resource.data) || request.resource.data.cpf.matches('^[0-9]{11}$'))
+        && (!('endereco' in request.resource.data) || (request.resource.data.endereco is string && request.resource.data.endereco.size() <= 150))
         && request.resource.data.nome is string && request.resource.data.nome.size() >= 3 && request.resource.data.nome.size() <= 80
         && request.resource.data.telefone is string && request.resource.data.telefone.size() >= 10 && request.resource.data.telefone.size() <= 11;
       allow delete: if isDono();
@@ -72,7 +74,7 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == 'aguardando'
-        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','aceitouRegras'])
+        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato'])
         && request.resource.data.cliente is string && request.resource.data.cliente.size() >= 3 && request.resource.data.cliente.size() <= 80
         && request.resource.data.telefone is string && request.resource.data.telefone.size() >= 10 && request.resource.data.telefone.size() <= 11
         && request.resource.data.data is string && request.resource.data.data.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
@@ -81,6 +83,7 @@ service cloud.firestore {
         && request.resource.data.evento is string && request.resource.data.evento.size() <= 60
         && request.resource.data.obs is string && request.resource.data.obs.size() <= 400
         && request.resource.data.codigo is string && request.resource.data.codigo.size() <= 12
+        && (!('clienteCpf' in request.resource.data) || request.resource.data.clienteCpf.matches('^[0-9]{11}$'))
       );
     }
   }

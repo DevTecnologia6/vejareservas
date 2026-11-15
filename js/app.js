@@ -5,6 +5,7 @@ import * as db from './db.js';
 import { renderCalendario, MESES, toISO } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { comprimir, abrirVisualizador } from './fotos.js';
+import { htmlContrato, abrirContrato, CLAUSULAS_PADRAO, cpfFmt, cpfMascarado, cpfValido } from './contrato.js';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, el = document) => el.querySelector(s);
@@ -64,7 +65,13 @@ const fmtDataHora = (ms) => { const d = new Date(ms); return `${br(toISO(d))} à
 const CONFIG_PADRAO = {
   nome: 'Espaço Veja', preco12: 770, preco24: 1000, taxaLimpeza: 75, horaEntrada: '09:00', horarios: '08:00, 09:00, 10:00, 12:00, 14:00', whatsapp: '',
   preReserva: true, sinalPct: 50, regras: REGRAS_PADRAO,
-  pixTipo: 'celular', pixChave: '', pixNome: '', pixCidade: ''
+  pixTipo: 'celular', pixChave: '', pixNome: '', pixCidade: '',
+  locadorNome: '', locadorCpf: '', locadorEndereco: '', imovelEndereco: '', foro: 'Serra/ES', clausulas: CLAUSULAS_PADRAO, assinatura: ''
+};
+// Cópia dos dados do contrato gravada na reserva no momento da confirmação
+const contratoSnapshot = () => {
+  const c = state.config;
+  return { nomeEspaco: c.nome, locadorNome: c.locadorNome, locadorCpf: c.locadorCpf, locadorEndereco: c.locadorEndereco, imovelEndereco: c.imovelEndereco, foro: c.foro, clausulas: c.clausulas, assinatura: c.assinatura, geradoEm: new Date().toISOString() };
 };
 
 const selo = (s) => `<span class="selo st-${s}">${STATUS[s]?.label || s}</span>`;
@@ -258,7 +265,8 @@ function ligarSolicitacoes(el) {
       cliente: x.cliente, telefone: x.telefone, data: x.data, periodo: x.periodo, evento: x.evento, horaEntrada: x.horaEntrada || state.config.horaEntrada,
       valor: x.valor, taxaLimpeza: x.taxaLimpeza, status: x.sinal ? 'confirmada' : 'pendente',
       obs: [`Pré-reserva ${x.codigo} (site)`, x.obs].filter(Boolean).join(' — '),
-      _sol: x.id, _sinal: x.sinal, _clienteUid: x.uid, _clienteEmail: x.email
+      clienteCpf: x.clienteCpf || '', clienteEndereco: x.clienteEndereco || '',
+      _sol: x.id, _sinal: x.sinal, _clienteUid: x.uid, _clienteEmail: x.email, _aceite: x.aceiteContrato
     });
   }));
   $$('[data-recusar]', el).forEach((b) => (b.onclick = async () => {
@@ -333,6 +341,8 @@ function abrirFormReserva(r = {}) {
     <form id="form-res" class="grade-form">
       <label class="campo inteiro">Nome do cliente<input name="cliente" required value="${esc(v.cliente)}"></label>
       <label class="campo">WhatsApp / telefone<input name="telefone" inputmode="tel" placeholder="(27) 99999-9999" value="${esc(foneFmt(v.telefone) === '—' ? '' : foneFmt(v.telefone))}"></label>
+      <label class="campo">CPF do cliente (para o contrato)<input name="clienteCpf" inputmode="numeric" placeholder="000.000.000-00" value="${esc(cpfFmt(v.clienteCpf))}"></label>
+      <label class="campo">Endereço do cliente<input name="clienteEndereco" placeholder="Rua, nº, bairro, cidade" value="${esc(v.clienteEndereco)}"></label>
       <label class="campo">Tipo de evento<input name="evento" list="eventos" placeholder="Aniversário, churrasco…" value="${esc(v.evento)}">
         <datalist id="eventos"><option>Aniversário</option><option>Confraternização</option><option>Chá de bebê</option><option>Churrasco</option><option>Casamento</option><option>Day use</option></datalist></label>
       <label class="campo">Data${v.status === 'congelada' ? ' (opcional se congelada)' : ''}<input type="date" name="data" value="${esc(v.data)}"></label>
@@ -382,8 +392,10 @@ function abrirFormReserva(r = {}) {
       const dados = {
         cliente: d.cliente.trim(), telefone: soDigitos(d.telefone), evento: d.evento.trim(), data: d.data || '',
         periodo: d.periodo, horaEntrada: d.horaEntrada, status: d.status, valor: +d.valor || 0,
-        taxaLimpeza: d.querLimpeza ? +d.taxaLimpeza || 0 : 0, obs: d.obs.trim()
+        taxaLimpeza: d.querLimpeza ? +d.taxaLimpeza || 0 : 0, obs: d.obs.trim(),
+        clienteCpf: soDigitos(d.clienteCpf), clienteEndereco: (d.clienteEndereco || '').trim()
       };
+      if (dados.clienteCpf && !cpfValido(dados.clienteCpf)) return ($('#res-erro', m).textContent = 'CPF do cliente inválido.');
       if (!dados.data && dados.status !== 'congelada') return ($('#res-erro', m).textContent = 'Informe a data (só reservas congeladas podem ficar sem data).');
       if (dados.data && OCUPA.includes(dados.status)) {
         const choque = state.reservas.find((x) => x.id !== r.id && x.data === dados.data && OCUPA.includes(x.status));
@@ -395,7 +407,8 @@ function abrirFormReserva(r = {}) {
           dados.pagamentos = +d.sinal > 0 ? [{ valor: +d.sinal, data: hoje(), forma: d.formaSinal }] : [];
           dados.criadoEm = `${hoje()}T${new Date().toTimeString().slice(0, 8)}`;
           if (r._clienteUid) { dados.clienteUid = r._clienteUid; dados.clienteEmail = r._clienteEmail || ''; }
-          if (dados.status === 'confirmada') dados.prazoCancelamento = prazoCancelamento(dados);
+          if (r._aceite) dados.aceiteContrato = r._aceite;
+          if (dados.status === 'confirmada') { dados.prazoCancelamento = prazoCancelamento(dados); dados.contrato = contratoSnapshot(); }
           const id = await db.add('reservas', dados);
           state.reservas.push({ id, ...dados });
           if (r._sol) {
@@ -404,6 +417,7 @@ function abrirFormReserva(r = {}) {
           }
         } else {
           if (dados.status === 'confirmada' && !r.prazoCancelamento) dados.prazoCancelamento = prazoCancelamento(dados);
+          if (dados.status === 'confirmada' && !r.contrato) dados.contrato = contratoSnapshot();
           await db.update('reservas', r.id, dados);
           Object.assign(state.reservas.find((x) => x.id === r.id), dados);
         }
@@ -439,6 +453,9 @@ function abrirDetalhe(id) {
       ${r.prazoCancelamento ? `<div><small>Cliente pode cancelar até</small><b class="${Date.now() > r.prazoCancelamento ? 'negativo' : ''}">${fmtDataHora(r.prazoCancelamento)}${Date.now() > r.prazoCancelamento ? ' (encerrado)' : ''}</b></div>` : ''}
       <div><small>Evento</small><b>${esc(r.evento || '—')}</b></div>
       <div><small>Telefone</small><b>${foneFmt(r.telefone)}</b></div>
+      ${r.clienteCpf ? `<div><small>CPF</small><b>${cpfFmt(r.clienteCpf)}</b></div>` : ''}
+      ${r.clienteEndereco ? `<div><small>Endereço</small><b>${esc(r.clienteEndereco)}</b></div>` : ''}
+      ${r.aceiteContrato ? `<div><small>Contrato aceito pelo cliente</small><b>${new Date(r.aceiteContrato).toLocaleString('pt-BR').slice(0, 17)}</b></div>` : ''}
       ${r.clienteEmail ? `<div><small>Conta do cliente</small><b>${esc(r.clienteEmail)}</b></div>` : ''}
       <div><small>Cadastrada em</small><b>${r.criadoEm ? br(r.criadoEm.slice(0, 10)) : '—'}</b></div>
       ${r.obs ? `<div style="grid-column:1/-1"><small>Observações</small><b style="font-weight:500">${esc(r.obs)}</b></div>` : ''}
@@ -458,10 +475,12 @@ function abrirDetalhe(id) {
     <div class="modal-acoes">
       <button class="btn btn-perigo" id="d-excluir">Excluir</button>
       ${r.telefone ? `<a class="btn btn-verde" target="_blank" rel="noopener" href="https://wa.me/${foneBR(r.telefone)}?text=${msgCliente}">${ICO.zap} WhatsApp</a>` : ''}
+      <button class="btn btn-claro" id="d-contrato">📄 Contrato</button>
       <button class="btn btn-claro" id="d-editar">Editar</button>
       ${c.falta > 0 ? '<button class="btn btn-ouro" id="d-pagar">Registrar pagamento</button>' : ''}
     </div>`, (m) => {
     $('#d-editar', m).onclick = () => abrirFormReserva(r);
+    $('#d-contrato', m).onclick = () => abrirContrato(htmlContrato(r, r.contrato || contratoSnapshot()), `Contrato - ${r.cliente} - ${br(r.data)}`);
     $('#d-pagar', m) && ($('#d-pagar', m).onclick = () => abrirPagamento(r));
     $('#d-excluir', m).onclick = async () => {
       if (!confirm(`Excluir a reserva de ${r.cliente}? Isso não pode ser desfeito.`)) return;
@@ -498,6 +517,7 @@ function abrirPagamento(r) {
       const upd = { pagamentos };
       if (d.confirmar && r.status === 'pendente') upd.status = 'confirmada';
       if ((upd.status || r.status) === 'confirmada' && !r.prazoCancelamento) upd.prazoCancelamento = prazoCancelamento(r);
+      if ((upd.status || r.status) === 'confirmada' && !r.contrato) upd.contrato = contratoSnapshot();
       await db.update('reservas', r.id, upd);
       Object.assign(r, upd);
       await sincronizarOcupacao(r.data);
@@ -745,6 +765,26 @@ function renderConfig(el) {
           <div style="margin-top:12px"><button type="button" class="btn btn-claro btn-peq" id="testar-pix">Testar QR Code (R$ 1,00)</button></div>
         </div>
         <div class="card">
+          <div class="card-topo"><h3>📄 Contrato</h3><button type="button" class="btn btn-claro btn-peq" id="ver-modelo">Ver modelo</button></div>
+          <p style="color:var(--cinza);font-size:14px;margin-bottom:12px">Esses dados ficam só no seu painel (não vão para o GitHub). O cliente vê o contrato completo apenas depois que o pagamento for confirmado.</p>
+          <div class="grade-form">
+            <label class="campo inteiro">Seu nome completo (locador)<input name="locadorNome" value="${esc(c.locadorNome)}"></label>
+            <label class="campo">Seu CPF<input name="locadorCpf" inputmode="numeric" placeholder="000.000.000-00" value="${esc(cpfFmt(c.locadorCpf))}"></label>
+            <label class="campo">Foro (cidade/UF)<input name="foro" value="${esc(c.foro)}" placeholder="Serra/ES"></label>
+            <label class="campo inteiro">Seu endereço<input name="locadorEndereco" value="${esc(c.locadorEndereco)}" placeholder="Rua, nº, bairro, cidade/UF"></label>
+            <label class="campo inteiro">Endereço do imóvel (se for diferente)<input name="imovelEndereco" value="${esc(c.imovelEndereco)}" placeholder="Deixe vazio se for o mesmo"></label>
+            <div class="campo inteiro">Sua assinatura
+              <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <div id="assin-prev" style="background:#fff;border:1px dashed var(--linha);border-radius:10px;min-width:180px;height:70px;display:flex;align-items:center;justify-content:center;font-weight:400;color:var(--cinza);font-size:12px">${c.assinatura ? `<img src="${c.assinatura}" style="max-height:62px;max-width:220px">` : 'sem assinatura'}</div>
+                <label class="btn btn-claro btn-peq" style="cursor:pointer">Enviar foto da assinatura<input type="file" id="up-assin" accept="image/*" hidden></label>
+                ${c.assinatura ? '<button type="button" class="btn-link" id="rm-assin">remover</button>' : ''}
+              </div>
+              <small style="font-weight:400">Assine em papel branco com caneta escura e tire uma foto de perto.</small></div>
+            <label class="campo inteiro">Cláusulas do contrato<textarea name="clausulas" rows="10" style="font-size:13px">${esc(c.clausulas)}</textarea>
+              <small style="font-weight:400">As partes, o período e os valores são preenchidos automaticamente. Aqui ficam as regras (cuidados, piscina, utensílios, desistência…).</small></label>
+          </div>
+        </div>
+        <div class="card">
           <div class="card-topo"><h3>Calendário público</h3></div>
           <p style="color:var(--cinza);font-size:14px;margin-bottom:12px">Envie este link para os clientes ou coloque na bio do Instagram. Eles veem só os dias livres e ocupados, sem nomes nem valores de outras reservas.</p>
           ${db.dominioOficial ? `<p class="nota-seg" style="margin-bottom:10px">🔒 Endereço oficial protegido: <b>${esc(db.dominioOficial)}</b>. Cópias do site em outros endereços mostram um alerta de site falso.</p>` : `<p class="aviso-demo" style="margin-bottom:10px">Defina o <b>dominioOficial</b> em <code>js/firebase-config.js</code> para ativar o alerta contra sites falsos.</p>`}
@@ -765,6 +805,19 @@ function renderConfig(el) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vejareservas-backup-${hoje()}.json`; a.click();
   };
   const f = $('#form-cfg');
+  let assinatura = c.assinatura || '';
+  $('#up-assin').onchange = async (e) => {
+    const arq = e.target.files[0]; if (!arq) return;
+    assinatura = await comprimir(arq, 700, 0.85, 120000);
+    $('#assin-prev').innerHTML = `<img src="${assinatura}" style="max-height:62px;max-width:220px">`;
+    toast('Assinatura carregada. Clique em Salvar configurações.');
+  };
+  $('#rm-assin')?.addEventListener('click', () => { assinatura = ''; $('#assin-prev').textContent = 'sem assinatura'; });
+  $('#ver-modelo').onclick = () => {
+    const k = { nomeEspaco: f.nome.value, locadorNome: f.locadorNome.value, locadorCpf: soDigitos(f.locadorCpf.value), locadorEndereco: f.locadorEndereco.value, imovelEndereco: f.imovelEndereco.value, foro: f.foro.value, clausulas: f.clausulas.value, assinatura };
+    const exemplo = { cliente: 'Nome do Cliente (exemplo)', clienteCpf: '', clienteEndereco: '', data: toISO(new Date(Date.now() + 15 * 864e5)), periodo: '24h', horaEntrada: f.horaEntrada.value || '09:00', valor: +f.preco24.value, taxaLimpeza: +f.taxaLimpeza.value, evento: 'Aniversário', pagamentos: [{ valor: Math.round(+f.preco24.value / 2), forma: 'Pix' }], aceiteContrato: new Date().toISOString(), clienteEmail: 'cliente@exemplo.com' };
+    abrirContrato(htmlContrato(exemplo, k), 'Modelo de contrato');
+  };
   $('#testar-pix').onclick = () => {
     if (!f.pixChave.value.trim() || !f.pixNome.value.trim()) return toast('Preencha a chave e o nome do recebedor.');
     const code = gerarPix({ chave: f.pixChave.value, tipo: f.pixTipo.value, nome: f.pixNome.value, cidade: f.pixCidade.value, valor: 1, txid: 'TESTE' });
@@ -779,15 +832,20 @@ function renderConfig(el) {
       nome: d.nome.trim() || 'Espaço Veja', preco12: +d.preco12, preco24: +d.preco24, taxaLimpeza: +d.taxaLimpeza,
       horaEntrada: d.horaEntrada, horarios: d.horarios.trim(), whatsapp: soDigitos(d.whatsapp),
       preReserva: !!d.preReserva, sinalPct: +d.sinalPct, regras: d.regras.trim(),
-      pixTipo: d.pixTipo, pixChave: d.pixChave.trim(), pixNome: d.pixNome.trim(), pixCidade: d.pixCidade.trim()
+      pixTipo: d.pixTipo, pixChave: d.pixChave.trim(), pixNome: d.pixNome.trim(), pixCidade: d.pixCidade.trim(),
+      locadorNome: d.locadorNome.trim(), locadorCpf: soDigitos(d.locadorCpf), locadorEndereco: d.locadorEndereco.trim(),
+      imovelEndereco: d.imovelEndereco.trim(), foro: d.foro.trim(), clausulas: d.clausulas.trim() || CLAUSULAS_PADRAO, assinatura
     };
+    if (cfg.locadorCpf && !cpfValido(cfg.locadorCpf)) return toast('Seu CPF parece inválido. Confira os números.');
     await db.set('config', 'geral', cfg);
     // dados que o calendário público pode ver
     await db.set('publico', 'info', {
       nome: cfg.nome, whatsapp: cfg.whatsapp ? foneBR(cfg.whatsapp) : '',
       preco12: cfg.preco12, preco24: cfg.preco24, taxaLimpeza: cfg.taxaLimpeza, horaEntrada: cfg.horaEntrada, horarios: cfg.horarios,
       preReserva: cfg.preReserva, sinalPct: cfg.sinalPct, regras: cfg.regras,
-      pix: cfg.pixChave ? { chave: cfg.pixChave, tipo: cfg.pixTipo, nome: cfg.pixNome, cidade: cfg.pixCidade } : null
+      pix: cfg.pixChave ? { chave: cfg.pixChave, tipo: cfg.pixTipo, nome: cfg.pixNome, cidade: cfg.pixCidade } : null,
+      // prévia do contrato para o cliente (sem o seu CPF completo e sem o seu endereço)
+      contrato: { nomeEspaco: cfg.nome, locadorNome: cfg.locadorNome, locadorCpfMasc: cfg.locadorCpf ? cpfMascarado(cfg.locadorCpf) : '', imovelEndereco: cfg.imovelEndereco || cfg.locadorEndereco || '', foro: cfg.foro, clausulas: cfg.clausulas }
     });
     state.config = cfg; $('#nome-espaco').textContent = cfg.nome;
     toast('Configurações salvas!');
