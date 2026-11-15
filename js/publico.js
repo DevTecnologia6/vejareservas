@@ -383,7 +383,7 @@ async function abrirMinhas() {
     const corpo = $('#modal-raiz .modal-corpo');
     corpo.innerHTML = itens.length ? `<div class="lista-res">${itens.map((i) => `
       <div class="item-res" style="cursor:default;flex-wrap:wrap">
-        <div class="meio"><b>${i.data ? br(i.data) + ((+i.dias || 1) > 1 ? ` a ${br(addDias(i.data, i.dias - 1))}` : '') : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · ' + entradaSaidaTxt({ data: i.data, dias: i.dias, periodo: i.sol?.periodo || i.reserva?.periodo, horaEntrada: i.hora }) : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
+        <div class="meio"><b>${i.data ? br(i.data) + ((+i.dias || 1) > 1 ? ` a ${br(addDias(i.data, i.dias - 1))}` : '') : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · ' + entradaSaidaTxt({ data: i.data, dias: i.dias, meia: (i.sol || i.reserva)?.meia, periodo: i.sol?.periodo || i.reserva?.periodo, horaEntrada: i.hora }) : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
         <div class="dir"><span class="selo ${i.st[1]}">${i.st[0]}</span><b>${fmt(i.total)}</b></div>
         <div style="flex-basis:100%">${linhaPagamento(i)}${linhaCancel(i)}${i.situacao === 'expirada' || i.situacao === 'recusada' ? '' : linhaContrato(i)}</div>
       </div>`).join('')}</div>` : '<div class="vazio">Você ainda não tem reservas.<br>Escolha um dia livre no calendário!</div>';
@@ -443,8 +443,11 @@ function abrirCancelamento(i) {
 function abrirPreReserva(iso, dias = 1) {
   const temPix = !!info.pix?.chave && siteOficial;
   const varias = dias > 1;
-  const datas = datasDe({ data: iso, dias });
-  const fimTxt = varias ? ` a ${br(datas.at(-1))}` : '';
+  const diaExtra = addDias(iso, dias);               // dia seguinte à última diária (meia diária ocupa a data)
+  const extraLivre = !marcados[diaExtra];
+  let meia = false;
+  const datasAtuais = () => datasDe({ data: iso, dias, meia });
+  const fimTxt = varias ? ` a ${br(addDias(iso, dias - 1))}` : '';
   abrirModal(`Reservar · ${br(iso)}${fimTxt}`, `
     <p style="color:var(--cinza);margin-bottom:12px">${varias ? `${dias} diárias seguidas` : diaExtenso(iso)} · ${esc(info.nome)}</p>
     <div class="box-valores" style="margin-bottom:14px;font-size:14px">
@@ -463,6 +466,7 @@ function abrirPreReserva(iso, dias = 1) {
           <label><input type="radio" name="periodo" value="12h"><span><b>12 horas</b><small>${fmt(info.preco12)}</small></span></label>
         </div>
       </div>`}
+      ${+info.preco12 > 0 ? `<label class="inteiro opc-extra" ${varias ? '' : 'id="opc-meia"'} style="${varias ? '' : 'display:none'}"><input type="checkbox" name="meia" ${extraLivre ? '' : 'disabled'}><span><b>+ Meia diária (12 horas) no final</b><small>${extraLivre ? `+ ${fmt(info.preco12)} · ex.: 3 diárias + 12h = 3 dias e meio` : `Indisponível: o dia ${br(diaExtra)} já está reservado`}</small></span></label>` : ''}
       ${listaHorarios().length > 1 ? `<label class="campo inteiro">Horário de entrada *
         <select name="horaEntrada" required>${listaHorarios().map((h) => `<option ${h === (info.horaEntrada || '').padStart(5, '0') ? 'selected' : ''}>${h}</option>`).join('')}</select>
         <span class="horario-info" id="saida-info"></span></label>` : `<div class="campo inteiro">Horário<input type="hidden" name="horaEntrada" value="${listaHorarios()[0]}">
@@ -482,8 +486,10 @@ function abrirPreReserva(iso, dias = 1) {
     </form>`, (m) => {
     const f = $('#form-pre', m);
     const periodo = () => (varias ? '24h' : f.querySelector('[name=periodo]:checked').value);
+    const opcMeia = $('#opc-meia', m);
     const valores = () => {
-      const valor = varias ? +info.preco24 * dias : periodo() === '12h' ? +info.preco12 : +info.preco24;
+      meia = !!f.meia?.checked && periodo() === '24h';
+      const valor = (varias ? +info.preco24 * dias : periodo() === '12h' ? +info.preco12 : +info.preco24) + (meia ? +info.preco12 : 0);
       const limpeza = f.limpeza?.checked ? +info.taxaLimpeza : 0;
       const total = valor + limpeza;
       const sinal = Math.round(total * (+info.sinalPct || 100)) / 100;
@@ -492,34 +498,37 @@ function abrirPreReserva(iso, dias = 1) {
     const resumo = () => {
       const v = valores();
       $('#resumo', m).innerHTML = `
-        <div class="resumo-linha"><span>${varias ? `${dias} diárias × ${fmt(info.preco24)}` : `Locação ${periodo()}`}</span><span>${fmt(v.valor)}</span></div>
+        <div class="resumo-linha"><span>${varias ? `${dias} diárias × ${fmt(info.preco24)}` : `Locação ${periodo()}`}</span><span>${fmt(v.valor - (meia ? +info.preco12 : 0))}</span></div>
+        ${meia ? `<div class="resumo-linha"><span>Meia diária (12h)</span><span>${fmt(+info.preco12)}</span></div>` : ''}
         ${v.limpeza ? `<div class="resumo-linha"><span>Limpeza pós-evento</span><span>${fmt(v.limpeza)}</span></div>` : ''}
         <div class="resumo-linha total"><span>Total</span><span>${fmt(v.total)}</span></div>
         ${temPix && v.sinal < v.total ? `<div class="resumo-linha"><span>Sinal para garantir ${varias ? 'as datas' : 'a data'} (${info.sinalPct}%)</span><b>${fmt(v.sinal)}</b></div>` : ''}`;
     };
     const atualizarSaida = () => {
-      const s = saidaDate({ data: iso, dias, periodo: periodo(), horaEntrada: f.horaEntrada.value });
+      if (opcMeia) { opcMeia.style.display = periodo() === '24h' ? '' : 'none'; }
+      const s = saidaDate({ data: iso, dias, meia, periodo: periodo(), horaEntrada: f.horaEntrada.value });
       $('#saida-info', m).innerHTML = `Entrada <b>${brCurto(iso)} às ${f.horaEntrada.value}</b> · saída prevista <b>${String(s.getDate()).padStart(2, '0')}/${String(s.getMonth() + 1).padStart(2, '0')} às ${String(s.getHours()).padStart(2, '0')}:${String(s.getMinutes()).padStart(2, '0')}</b>`;
     };
-    f.querySelectorAll('[name=periodo], [name=limpeza], [name=horaEntrada]').forEach((r) => (r.onchange = () => { resumo(); atualizarSaida(); }));
+    f.querySelectorAll('[name=periodo], [name=limpeza], [name=horaEntrada], [name=meia]').forEach((r) => (r.onchange = () => { resumo(); atualizarSaida(); }));
     resumo(); atualizarSaida();
     $('[data-fechar2]', m).onclick = fecharModal;
     $('#editar-dados', m).onclick = () => abrirDadosContrato(() => abrirPreReserva(iso, dias));
     const montar = () => {
       const v = valores();
-      return { cliente: perfil.nome, clienteCpf: perfil.cpf, clienteEndereco: perfil.endereco, telefone: perfil.telefone, clienteEmail: usuario.email, data: iso, dias, periodo: periodo(), horaEntrada: f.horaEntrada.value, evento: f.evento.value.trim(), valor: v.valor, taxaLimpeza: v.limpeza, total: v.total, sinal: v.sinal };
+      return { cliente: perfil.nome, clienteCpf: perfil.cpf, clienteEndereco: perfil.endereco, telefone: perfil.telefone, clienteEmail: usuario.email, data: iso, dias, meia, periodo: periodo(), horaEntrada: f.horaEntrada.value, evento: f.evento.value.trim(), valor: v.valor, taxaLimpeza: v.limpeza, total: v.total, sinal: v.sinal };
     };
     $('#ler-contrato', m).onclick = () => abrirContrato(htmlContrato({ ...montar(), pagamentos: [] }, { clausulas: CLAUSULAS_PADRAO, ...(info.contrato || {}), nomeEspaco: info.nome }, { previa: true }), 'Contrato de locação (prévia)');
     f.onsubmit = async (e) => {
       e.preventDefault();
       const d = Object.fromEntries(new FormData(f));
+      const datas = datasAtuais();
       const ocupada = datas.find((x) => marcados[x]);
       if (ocupada) return ($('#pre-erro', m).textContent = `O dia ${br(ocupada)} acabou de ser reservado. Escolha outras datas.`);
       const r = montar();
       const codigo = 'VEJA' + Math.random().toString(36).slice(2, 6).toUpperCase();
       const sol = {
         uid: usuario.uid, email: usuario.email,
-        cliente: r.cliente.slice(0, 80), telefone: r.telefone, data: iso, dias, periodo: r.periodo, horaEntrada: r.horaEntrada,
+        cliente: r.cliente.slice(0, 80), telefone: r.telefone, data: iso, dias, ...(r.meia ? { meia: true } : {}), periodo: r.periodo, horaEntrada: r.horaEntrada,
         evento: r.evento.slice(0, 60), obs: (d.obs || '').trim().slice(0, 400),
         valor: r.valor, taxaLimpeza: r.taxaLimpeza, total: r.total, sinal: temPix ? r.sinal : 0,
         codigo, status: 'aguardando', criadoEm: new Date().toISOString(), expiraEm: Date.now() + (+info.prazoPagamentoMin || 30) * 60000, aceitouRegras: !!d.aceite || !info.regras,

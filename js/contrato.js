@@ -54,7 +54,7 @@ function saida(r) {
   if (!r.data || !r.horaEntrada) return '';
   const [h, m] = r.horaEntrada.split(':').map(Number);
   const d = new Date(`${r.data}T00:00:00`);
-  d.setHours(h + ((+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24), m);
+  d.setHours(h + ((+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24) + (r.meia ? 12 : 0), m);
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
@@ -86,10 +86,10 @@ export function htmlContrato(r, k, op = {}) {
     <p>As partes acima identificadas têm entre si, justo e contratado, o presente contrato, que se regerá pelas cláusulas seguintes.</p>
 
     <h4>CLÁUSULA 1ª – DO OBJETO E DO PERÍODO</h4>
-    <p>O LOCADOR cede ao LOCATÁRIO, para uso temporário${r.evento ? ` destinado ao evento <b>${esc(r.evento)}</b>` : ''}, o imóvel denominado <b>${esc(k.nomeEspaco || 'Espaço Veja')}</b>, situado em ${linha(k.imovelEndereco || k.locadorEndereco, 40)}, pelo período de <b>${(+r.dias || 1) > 1 ? `${r.dias} diárias (24 horas cada)` : esc(r.periodo || '___')}</b>, com entrada em <b>${br(r.data)} às ${esc(r.horaEntrada || '___:___')}</b> e saída em <b>${saida(r) || '____/____/______'}</b>.</p>
+    <p>O LOCADOR cede ao LOCATÁRIO, para uso temporário${r.evento ? ` destinado ao evento <b>${esc(r.evento)}</b>` : ''}, o imóvel denominado <b>${esc(k.nomeEspaco || 'Espaço Veja')}</b>, situado em ${linha(k.imovelEndereco || k.locadorEndereco, 40)}, pelo período de <b>${(+r.dias || 1) > 1 ? `${r.dias} diárias (24 horas cada)` : r.meia ? '1 diária (24 horas)' : esc(r.periodo || '___')}${r.meia ? ' + meia diária (12 horas)' : ''}</b>, com entrada em <b>${br(r.data)} às ${esc(r.horaEntrada || '___:___')}</b> e saída em <b>${saida(r) || '____/____/______'}</b>.</p>
 
     <h4>CLÁUSULA 2ª – DO VALOR E DO PAGAMENTO</h4>
-    <p>Pela locação, o LOCATÁRIO pagará o valor total de <b>${fmt(total)}</b>, sendo ${fmt(r.valor)} referentes à locação${(+r.dias || 1) > 1 ? ` (${r.dias} diárias)` : ''}${+r.taxaLimpeza > 0 ? ` e ${fmt(r.taxaLimpeza)} referentes à limpeza pós-evento, contratada pelo LOCATÁRIO` : ', sem contratação da limpeza pós-evento'}. ${pago > 0 ? `Já foi pago o valor de <b>${fmt(pago)}</b>${formas ? ` (${esc(formas)})` : ''}` : 'O pagamento será realizado conforme combinado entre as partes'}${pago > 0 && total - pago > 0 ? `, restando <b>${fmt(total - pago)}</b> a serem quitados até a entrada no imóvel` : pago > 0 ? ', estando o valor integralmente quitado' : ''}.</p>
+    <p>Pela locação, o LOCATÁRIO pagará o valor total de <b>${fmt(total)}</b>, sendo ${fmt(r.valor)} referentes à locação${(+r.dias || 1) > 1 ? ` (${r.dias} diárias${r.meia ? ' + meia diária' : ''})` : r.meia ? ' (1 diária + meia diária)' : ''}${+r.taxaLimpeza > 0 ? ` e ${fmt(r.taxaLimpeza)} referentes à limpeza pós-evento, contratada pelo LOCATÁRIO` : ', sem contratação da limpeza pós-evento'}. ${pago > 0 ? `Já foi pago o valor de <b>${fmt(pago)}</b>${formas ? ` (${esc(formas)})` : ''}` : 'O pagamento será realizado conforme combinado entre as partes'}${pago > 0 && total - pago > 0 ? `, restando <b>${fmt(total - pago)}</b> a serem quitados até a entrada no imóvel` : pago > 0 ? ', estando o valor integralmente quitado' : ''}.</p>
 
     ${clausulas}
 

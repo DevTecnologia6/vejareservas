@@ -33,7 +33,7 @@ service cloud.firestore {
     function diaTs(s)       { return timestamp.date(int(s.split('-')[0]), int(s.split('-')[1]), int(s.split('-')[2])); }
     // a data está dentro das diárias da pré-reserva?
     function dentroDaSol(dia, s) {
-      return diaTs(dia) >= diaTs(s.data) && diaTs(dia) < diaTs(s.data) + duration.value(s.get('dias', 1), 'd');
+      return diaTs(dia) >= diaTs(s.data) && diaTs(dia) < diaTs(s.data) + duration.value(s.get('dias', 1) + (s.get('meia', false) == true ? 1 : 0), 'd');
     }
 
     // ================= Acesso em duas etapas do administrador =================
@@ -142,7 +142,8 @@ service cloud.firestore {
       let dias = d.get('dias', 1);
       let pct = info.get('sinalPct', 100);
       return info.get('preReserva', true) == true
-        && d.valor == (dias > 1 ? info.preco24 * dias : (d.periodo == '12h' ? info.preco12 : info.preco24))
+        && d.valor == (dias > 1 ? info.preco24 * dias : (d.periodo == '12h' ? info.preco12 : info.preco24)) + (d.get('meia', false) == true ? info.preco12 : 0)
+        && (d.get('meia', false) == false || (d.meia == true && d.periodo == '24h'))
         && (d.taxaLimpeza == 0 || d.taxaLimpeza == info.taxaLimpeza)
         && d.total == d.valor + d.taxaLimpeza
         && ((d.sinal == 0 && info.get('pix', null) == null)
@@ -169,7 +170,7 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == 'aguardando'
-        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','expiraEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato'])
+        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','expiraEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato','meia'])
         && request.resource.data.cliente is string && request.resource.data.cliente.size() >= 3 && request.resource.data.cliente.size() <= 80
         && request.resource.data.telefone is string && request.resource.data.telefone.matches('^[0-9]{11}$')
         && dataValida(request.resource.data.data)
