@@ -1,0 +1,20 @@
+import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
+import { readFileSync } from 'fs';
+const env = await initializeTestEnvironment({ projectId: 'demo-veja', firestore: { rules: readFileSync('firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 } });
+await env.withSecurityRulesDisabled(async (c) => {
+  const d = c.firestore();
+  await d.doc('publico/info').set({ nome: 'X', preReserva: true });
+  await d.doc('ocupacao/2026-12-01').set({ status: 'reservado' });
+  await d.doc('clientes/ane').set({ nome: 'Ane' });
+});
+const tok = (extra) => ({ email: 'ane@x.com', email_verified: true, auth_time: 1700000000, ...extra });
+const cli = env.authenticatedContext('ane', tok()).firestore();
+const r = async (n, p) => { try { await p; console.log('OK  ', n); } catch (e) { console.log('FALHOU', n, e.message.split('\n')[0]); } };
+await r('cliente lê publico/info', assertSucceeds(cli.doc('publico/info').get()));
+await r('cliente lista ocupacao', assertSucceeds(cli.collection('ocupacao').get()));
+await r('cliente lê o próprio perfil', assertSucceeds(cli.doc('clientes/ane').get()));
+const nv = env.authenticatedContext('nv', tok({ email: 'nv@x.com', email_verified: false })).firestore();
+await r('não verificado bloqueado', assertFails(nv.doc('publico/info').get()));
+const dono = env.authenticatedContext('dono', tok({ email: 'devtecnologia6@gmail.com' })).firestore();
+await r('dono sem senha bloqueado', assertFails(dono.doc('config/geral').get()));
+await env.cleanup();
