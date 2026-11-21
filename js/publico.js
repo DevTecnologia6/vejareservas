@@ -457,6 +457,40 @@ async function abrirMinhas() {
   }
 }
 
+// Aviso no topo do site: reserva ativa com saldo a pagar (some quando o pagamento é informado ou confirmado)
+async function mostrarAvisoSaldo() {
+  const alvo = $('#aviso-saldo');
+  if (!alvo || !usuario) return;
+  try {
+    const [res, pags] = await Promise.all([
+      db.query('reservas', 'clienteUid', usuario.uid),
+      db.query('pagamentosCliente', 'uid', usuario.uid).catch(() => [])
+    ]);
+    const informado = Object.fromEntries(pags.filter((p) => p.status === 'informado').map((p) => [p.id, p]));
+    const comSaldo = res.map((r) => {
+      const total = (+r.valor || 0) + (+r.taxaLimpeza || 0);
+      const pago = (r.pagamentos || []).reduce((t, p) => t + (+p.valor || 0), 0);
+      return { r, falta: Math.round((total - pago) * 100) / 100 };
+    }).filter(({ r, falta }) => ['pendente', 'confirmada'].includes(r.status) && falta > 0 && r.data
+      && (r.horaEntrada ? iniFim(r).fim > Date.now() : r.data >= new Date().toISOString().slice(0, 10)))
+      .sort((a, b) => a.r.data.localeCompare(b.r.data));
+    const pendentes = comSaldo.filter((x) => !informado[x.r.id]);
+    const aguardando = comSaldo.filter((x) => informado[x.r.id]);
+    const podePix = !!info.pix?.chave && siteOficial;
+    alvo.innerHTML = pendentes.map(({ r, falta }) => `
+      <div class="aviso-saldo">
+        <div class="txt">⚠️ <b>Falta pagar ${fmt(falta)}</b> da sua reserva de <b>${br(r.data)}</b> (${periodoTxt(r)}${r.horaEntrada ? ` · entrada às ${r.horaEntrada}` : ''}).</div>
+        ${podePix ? `<button class="btn btn-ouro btn-peq" data-pagar-saldo="${r.id}">💳 Pagar agora</button>`
+          : info.whatsapp ? `<a class="btn btn-verde btn-peq" target="_blank" rel="noopener" href="${linkZap(`Olá! Quero acertar o restante (${fmt(falta)}) da minha reserva de ${br(r.data)}.`)}">${ZAP} Combinar o pagamento</a>` : ''}
+      </div>`).join('') + aguardando.map(({ r }) => `
+      <div class="aviso-saldo ok"><div class="txt">✅ Pagamento de ${fmt(informado[r.id].valor)} da reserva de <b>${br(r.data)}</b> informado — aguardando a confirmação do ${esc(info.nome)}.</div></div>`).join('');
+    alvo.querySelectorAll('[data-pagar-saldo]').forEach((b) => (b.onclick = () => {
+      const x = pendentes.find((p) => p.r.id === b.dataset.pagarSaldo);
+      abrirPagarRestante(x.r, x.falta);
+    }));
+  } catch (e) { console.warn('aviso de saldo', e); }
+}
+
 // Pix do saldo: QR com o valor que falta + "Já paguei" (o dono confere e confirma no painel)
 function abrirPagarRestante(r, falta) {
   const codigo = 'VEJA' + Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -487,6 +521,7 @@ function abrirPagarRestante(r, falta) {
       btn.disabled = true; btn.textContent = 'Registrando…';
       try {
         await db.set('pagamentosCliente', r.id, { uid: usuario.uid, reservaId: r.id, cliente: String(perfil?.nome || r.cliente || '').slice(0, 80), data: r.data, valor: falta, codigo, status: 'informado', criadoEm: new Date().toISOString() });
+        mostrarAvisoSaldo();
         abrirMinhas();
       } catch (err) {
         console.error(err); janela?.close(); btn.disabled = false; btn.innerHTML = `${ZAP} Já paguei — enviar comprovante`;
@@ -844,6 +879,7 @@ async function carregarApp(tentativa = 1) {
   $('#ant').onclick = () => { mes = new Date(mes.getFullYear(), mes.getMonth() - 1, 1); desenhar(); };
   $('#prox').onclick = () => { mes = new Date(mes.getFullYear(), mes.getMonth() + 1, 1); desenhar(); };
   desenhar();
+  mostrarAvisoSaldo();
 }
 
 let appCarregado = false;
