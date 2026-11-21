@@ -190,8 +190,10 @@ const ERROS = {
   'auth/invalid-email': 'E-mail inválido.',
   'auth/weak-password': 'A senha precisa ter pelo menos 6 caracteres.',
   'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente de novo.',
-  'auth/unauthorized-domain': 'Este endereço não está autorizado. Use o site oficial.'
+  'auth/unauthorized-domain': 'Este endereço não está autorizado. Use o site oficial.',
+  'cpf-em-uso': 'Este CPF já tem cadastro. Use "Já tenho conta" para entrar (ou "Esqueci minha senha"). Se você não criou essa conta, fale com a gente pelo WhatsApp.'
 };
+let cadastrando = false;
 const msgErro = (e) => ERROS[e?.code] || ('Algo deu errado. Tente novamente.' + (e?.code ? ` (${e.code})` : ''));
 // botão 👁 para ver a senha digitada (evita erro de digitação no celular)
 function olhoSenha(raiz) {
@@ -255,6 +257,7 @@ function abrirConta(aba = 'cadastro', depois) {
       e.preventDefault();
       const d = Object.fromEntries(new FormData(f));
       const erro = $('#conta-erro', m);
+      erro.textContent = '';
       let cadastro;
       if (cad) {
         const r = lerCadastro(new FormData(f));
@@ -266,10 +269,14 @@ function abrirConta(aba = 'cadastro', depois) {
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Aguarde…';
       try {
         if (cad) {
+          cadastrando = true;   // o aviso de login do Firebase espera o perfil ser aceito
           usuario = await db.clienteCadastrar(d.email.trim(), d.senha);
           const dadosPerfil = { ...cadastro, email: d.email.trim(), criadoEm: new Date().toISOString() };
+          try { await db.salvarPerfil(usuario.uid, dadosPerfil); }
+          catch (errPerfil) { await db.clienteDesfazerCadastro(); usuario = null; throw errPerfil; }
           perfil = { ...dadosPerfil, _uid: usuario.uid };
-          await db.set('clientes', usuario.uid, dadosPerfil);
+          await db.clienteReenviarConfirmacao().catch((e2) => console.warn(e2));
+          cadastrando = false;
         } else {
           usuario = await db.clienteEntrar(d.email.trim(), d.senha);
           await carregarPerfil();
@@ -279,6 +286,7 @@ function abrirConta(aba = 'cadastro', depois) {
         else if (!perfil) abrirCompletarPerfil(depois);
         else { fecharModal(); depois && depois(); }
       } catch (err) {
+        cadastrando = false;
         console.error(err); btn.disabled = false; btn.textContent = cad ? 'Criar conta' : 'Entrar';
         erro.textContent = msgErro(err);
       }
@@ -332,7 +340,7 @@ function abrirCompletarPerfil(depois) {
       if (r.erro) return ($('#perfil-erro', m).textContent = r.erro);
       if (!cpfValido(r.dados.cpf)) return ($('#perfil-erro', m).textContent = 'CPF inválido. Confira os 11 números.');
       const dadosPerfil = { ...r.dados, email: usuario.email, criadoEm: perfil?.criadoEm || new Date().toISOString() };
-      try { await db.set('clientes', usuario.uid, dadosPerfil); } catch (err) { console.error(err); return ($('#perfil-erro', m).textContent = 'Não foi possível salvar. Tente novamente.'); }
+      try { await db.salvarPerfil(usuario.uid, dadosPerfil, perfil?.cpf); } catch (err) { console.error(err); return ($('#perfil-erro', m).textContent = err.code === 'cpf-em-uso' ? ERROS['cpf-em-uso'] : 'Não foi possível salvar. Tente novamente.'); }
       perfil = { ...dadosPerfil, _uid: usuario.uid };
       atualizarBarraConta(); fecharModal(); depois && depois();
     };
@@ -357,7 +365,7 @@ function abrirDadosContrato(depois) {
       if (r.erro) return ($('#doc-erro', m).textContent = r.erro);
       if (!cpfValido(r.dados.cpf)) return ($('#doc-erro', m).textContent = 'CPF inválido. Confira os 11 números.');
       const dadosPerfil = { ...r.dados, email: perfil?.email || usuario.email, criadoEm: perfil?.criadoEm || new Date().toISOString() };
-      try { await db.set('clientes', usuario.uid, dadosPerfil); } catch (err) { console.error(err); return ($('#doc-erro', m).textContent = 'Não foi possível salvar. Tente novamente.'); }
+      try { await db.salvarPerfil(usuario.uid, dadosPerfil, perfil?.cpf); } catch (err) { console.error(err); return ($('#doc-erro', m).textContent = err.code === 'cpf-em-uso' ? ERROS['cpf-em-uso'] : 'Não foi possível salvar. Tente novamente.'); }
       perfil = { ...dadosPerfil, _uid: usuario.uid };
       depois && depois();
     };
@@ -370,18 +378,20 @@ const ST_CANC = { pendente: 'Cancelamento solicitado — aguardando resposta', r
 async function abrirMinhas() {
   abrirModal('Minhas reservas', '<div class="vazio">Carregando…</div>');
   try {
-    const [sols, res, cancs] = await Promise.all([
+    const [sols, res, cancs, pags] = await Promise.all([
       db.query('solicitacoes', 'uid', usuario.uid),
       db.query('reservas', 'clienteUid', usuario.uid),
-      db.query('cancelamentos', 'uid', usuario.uid).catch(() => [])
+      db.query('cancelamentos', 'uid', usuario.uid).catch(() => []),
+      db.query('pagamentosCliente', 'uid', usuario.uid).catch(() => [])
     ]);
     const cancPor = Object.fromEntries(cancs.map((c) => [c.id, c]));
+    const pagPor = Object.fromEntries(pags.map((p) => [p.id, p]));
     const itens = [
       ...sols.map((s) => ({ sol: s, solId: s.id, situacao: situacaoSol(s), data: s.data, dias: s.dias, periodo: periodoTxt(s), hora: s.horaEntrada, total: s.total, codigo: s.codigo, st: ST_SOL[situacaoSol(s)] || ST_SOL.aguardando })),
       ...res.map((r) => {
         const total = (+r.valor || 0) + (+r.taxaLimpeza || 0);
         const pago = (r.pagamentos || []).reduce((t, p) => t + +p.valor, 0);
-        return { id: r.id, reserva: r, data: r.data, dias: r.dias, periodo: periodoTxt(r), hora: r.horaEntrada, total, pago, st: ST_RES[r.status] || [r.status, ''], prazo: r.prazoCancelamento, status: r.status, canc: cancPor[r.id] };
+        return { id: r.id, reserva: r, data: r.data, dias: r.dias, periodo: periodoTxt(r), hora: r.horaEntrada, total, pago, st: ST_RES[r.status] || [r.status, ''], prazo: r.prazoCancelamento, status: r.status, canc: cancPor[r.id], pag: pagPor[r.id] };
       })
     ].sort((a, b) => String(b.data).localeCompare(String(a.data)));
 
@@ -400,6 +410,15 @@ async function abrirMinhas() {
       if (i.situacao === 'expirada') return `<small class="info-canc neg">O pagamento não foi informado em ${+info.prazoPagamentoMin || 30} minutos e a pré-reserva expirou.</small>`;
       return '';
     };
+    // saldo da reserva: pagar pelo Pix e avisar (o dono confirma no painel)
+    const linhaRestante = (i) => {
+      if (!i.reserva || !['pendente', 'confirmada'].includes(i.status)) return '';
+      const falta = Math.round((i.total - i.pago) * 100) / 100;
+      if (i.pag?.status === 'informado') return `<small class="info-canc">✅ Pagamento de ${fmt(i.pag.valor)} informado — aguardando a confirmação do ${esc(info.nome)}.</small>`;
+      if (falta <= 0 || !info.pix?.chave || !siteOficial) return '';
+      return `${i.pag?.status === 'recusado' ? '<small class="info-canc neg">O último pagamento informado não foi confirmado. Fale com a gente pelo WhatsApp.</small>' : ''}
+        <button class="btn btn-ouro btn-peq" style="margin-top:8px;margin-right:6px" data-restante="${i.id}">💳 Pagar o restante (${fmt(falta)})</button>`;
+    };
     // reserva confirmada, antes do fim da estadia: pode pedir mais tempo (vai para aprovação)
     const linhaExtensao = (i) => (info.preReserva && i.reserva && i.status === 'confirmada' && i.reserva.data && i.reserva.horaEntrada && Date.now() <= iniFim(i.reserva).fim
       ? `<button class="btn btn-claro btn-peq" style="margin-top:8px;margin-right:6px" data-estender="${i.id}">⏱ Pedir mais tempo</button>` : '');
@@ -414,13 +433,14 @@ async function abrirMinhas() {
       <div class="item-res" style="cursor:default;flex-wrap:wrap">
         <div class="meio"><b>${i.sol?.extensao ? '⏱ Pedido de mais tempo · ' : ''}${i.data ? br(i.data) + ((+i.dias || 1) > 1 ? ` a ${br(addDias(i.data, i.dias - 1))}` : '') : 'Sem data (crédito)'}</b><small>${i.periodo}${i.hora ? ' · ' + entradaSaidaTxt({ data: i.data, dias: i.dias, meia: (i.sol || i.reserva)?.meia, periodo: i.sol?.periodo || i.reserva?.periodo, horaEntrada: i.hora }) : ''}${i.codigo ? ' · ' + esc(i.codigo) : ''}${i.pago != null ? ` · pago ${fmt(i.pago)}` : ''}</small></div>
         <div class="dir"><span class="selo ${i.st[1]}">${i.st[0]}</span><b>${fmt(i.total)}</b></div>
-        <div style="flex-basis:100%">${linhaPagamento(i)}${linhaCancel(i)}${linhaExtensao(i)}${i.situacao === 'expirada' || i.situacao === 'recusada' ? '' : linhaContrato(i)}</div>
+        <div style="flex-basis:100%">${linhaPagamento(i)}${linhaCancel(i)}${linhaRestante(i)}${linhaExtensao(i)}${i.situacao === 'expirada' || i.situacao === 'recusada' ? '' : linhaContrato(i)}</div>
       </div>`).join('')}</div>` : '<div class="vazio">Você ainda não tem reservas.<br>Escolha um dia livre no calendário!</div>';
     corpo.querySelectorAll('[data-contrato]').forEach((b) => (b.onclick = () => {
       const r = itens.find((i) => i.id === b.dataset.contrato).reserva;
       abrirContrato(htmlContrato(r, r.contrato), `Contrato - ${info.nome} - ${br(r.data)}`);
     }));
     corpo.querySelectorAll('[data-cancelar]').forEach((b) => (b.onclick = () => abrirCancelamento(itens.find((i) => i.id === b.dataset.cancelar))));
+    corpo.querySelectorAll('[data-restante]').forEach((b) => (b.onclick = () => { const i = itens.find((x) => x.id === b.dataset.restante); abrirPagarRestante(i.reserva, Math.round((i.total - i.pago) * 100) / 100); }));
     corpo.querySelectorAll('[data-estender]').forEach((b) => (b.onclick = () => abrirExtensao(itens.find((i) => i.id === b.dataset.estender).reserva)));
     limparTimers();
     corpo.querySelectorAll('[data-cont]').forEach((el) => { const i = itens.find((x) => x.solId === el.dataset.cont); contagem(el, i.sol.expiraEm, () => abrirMinhas()); });
@@ -435,6 +455,45 @@ async function abrirMinhas() {
     console.error(e);
     $('#modal-raiz .modal-corpo').innerHTML = '<div class="vazio">Não foi possível carregar agora. Tente novamente.</div>';
   }
+}
+
+// Pix do saldo: QR com o valor que falta + "Já paguei" (o dono confere e confirma no painel)
+function abrirPagarRestante(r, falta) {
+  const codigo = 'VEJA' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  const copiaECola = gerarPix({ ...info.pix, valor: falta, txid: codigo });
+  const msgZap = `Olá! Paguei pelo site o restante da minha reserva de ${br(r.data)} (${periodoTxt(r)}): ${fmt(falta)}, código ${codigo}, em nome de ${perfil?.nome || r.cliente}. Segue o comprovante.`;
+  abrirModal('Pagar o restante', `
+    <div style="text-align:center">
+      <p style="color:var(--cinza);font-size:14px;margin-bottom:14px">Reserva de ${br(r.data)} · ${periodoTxt(r)} · ${entradaSaidaTxt(r)}</p>
+      <div class="pix-box">
+        <b>Pague ${fmt(falta)} via Pix</b>
+        <div class="pix-qr">${qrSVG(copiaECola, 210)}</div>
+        <small>Abra o app do seu banco › Pix › Ler QR Code<br>ou use o Pix copia e cola:</small>
+        <div class="link-box" style="margin-top:8px"><code id="pix-code">${esc(copiaECola)}</code><button class="btn btn-ouro btn-peq" id="pix-copiar">Copiar</button></div>
+        <div class="nota-seg" style="margin-top:12px;text-align:left">${CADEADO}<span>Antes de confirmar no banco, confira se o recebedor é <b>${esc(info.pix.nome)}</b>. Se aparecer outro nome, não pague.</span></div>
+      </div>
+      <div class="erro" id="rest-erro"></div>
+      <button class="btn btn-verde btn-bloco" id="rest-paguei" style="margin-top:12px">${ZAP} Já paguei — enviar comprovante</button>
+      <button class="btn-link" id="rest-voltar" style="margin-top:8px">Voltar</button>
+    </div>`, (m) => {
+    $('#rest-voltar', m).onclick = abrirMinhas;
+    $('#pix-copiar', m).onclick = async (e) => {
+      try { await navigator.clipboard.writeText(copiaECola); e.target.textContent = 'Copiado ✓'; }
+      catch { const rg = document.createRange(); rg.selectNode($('#pix-code', m)); getSelection().removeAllRanges(); getSelection().addRange(rg); }
+    };
+    $('#rest-paguei', m).onclick = async (e) => {
+      const btn = e.currentTarget;
+      const janela = info.whatsapp ? window.open(linkZap(msgZap), '_blank') : null;
+      btn.disabled = true; btn.textContent = 'Registrando…';
+      try {
+        await db.set('pagamentosCliente', r.id, { uid: usuario.uid, reservaId: r.id, cliente: String(perfil?.nome || r.cliente || '').slice(0, 80), data: r.data, valor: falta, codigo, status: 'informado', criadoEm: new Date().toISOString() });
+        abrirMinhas();
+      } catch (err) {
+        console.error(err); janela?.close(); btn.disabled = false; btn.innerHTML = `${ZAP} Já paguei — enviar comprovante`;
+        $('#rest-erro', m).textContent = 'Não foi possível registrar agora. Envie o comprovante pelo WhatsApp.';
+      }
+    };
+  });
 }
 
 const DIAS_CANC = 7;
@@ -503,6 +562,13 @@ function abrirPreReserva(iso, dias = 1) {
         <span class="horario-info" id="saida-info" style="font-size:14px"></span></div>`}
       ${+info.taxaLimpeza > 0 ? `<label class="inteiro opc-extra"><input type="checkbox" name="limpeza"><span><b>Quero a limpeza pós-evento</b><small>+ ${fmt(info.taxaLimpeza)} · nossa equipe cuida da limpeza depois da sua festa</small></span></label>` : ''}
       <label class="campo inteiro">Observações (opcional)<textarea name="obs" maxlength="400" placeholder="Ex.: número de convidados, pedidos especiais…"></textarea></label>
+      ${temPix && +info.sinalPct < 100 ? `<div class="campo inteiro">Quanto você quer pagar agora? *
+        <div class="opc-periodo">
+          <label><input type="radio" name="pagar" value="sinal" checked><span><b>Sinal (${+info.sinalPct}%)</b><small id="pg-sinal"></small></span></label>
+          <label><input type="radio" name="pagar" value="total"><span><b>Valor total</b><small id="pg-total"></small></span></label>
+        </div>
+        <small style="font-weight:400;color:var(--cinza)">Pagando só o sinal, o restante pode ser pago depois pelo site, em Minhas reservas.</small>
+      </div>` : ''}
       <div class="inteiro box-valores" style="margin:0" id="resumo"></div>
       ${info.regras ? `<div class="inteiro regras"><b>Regras do espaço</b><div>${esc(info.regras).replace(/\n/g, '<br>')}</div></div>
       <label class="inteiro" style="display:flex;gap:8px;align-items:flex-start;font-size:14px"><input type="checkbox" name="aceite" required style="margin-top:3px"> Li e concordo com as regras do espaço.</label>` : ''}
@@ -522,8 +588,9 @@ function abrirPreReserva(iso, dias = 1) {
       const valor = (varias ? +info.preco24 * dias : periodo() === '12h' ? +info.preco12 : +info.preco24) + (meia ? +info.preco12 : 0);
       const limpeza = f.limpeza?.checked ? +info.taxaLimpeza : 0;
       const total = valor + limpeza;
-      const sinal = Math.round(total * (+info.sinalPct || 100)) / 100;
-      return { valor, limpeza, total, sinal };
+      const minimo = Math.round(total * (+info.sinalPct || 100)) / 100;
+      const sinal = f.pagar?.value === 'total' ? total : minimo;   // o cliente pode pagar tudo de uma vez
+      return { valor, limpeza, total, sinal, minimo };
     };
     const resumo = () => {
       const v = valores();
@@ -532,7 +599,9 @@ function abrirPreReserva(iso, dias = 1) {
         ${meia ? `<div class="resumo-linha"><span>Meia diária (12h)</span><span>${fmt(+info.preco12)}</span></div>` : ''}
         ${v.limpeza ? `<div class="resumo-linha"><span>Limpeza pós-evento</span><span>${fmt(v.limpeza)}</span></div>` : ''}
         <div class="resumo-linha total"><span>Total</span><span>${fmt(v.total)}</span></div>
-        ${temPix && v.sinal < v.total ? `<div class="resumo-linha"><span>Sinal para garantir ${varias ? 'as datas' : 'a data'} (${info.sinalPct}%)</span><b>${fmt(v.sinal)}</b></div>` : ''}`;
+        ${temPix ? `<div class="resumo-linha"><span>${v.sinal < v.total ? `Sinal para garantir ${varias ? 'as datas' : 'a data'} (${info.sinalPct}%)` : 'A pagar agora (valor total)'}</span><b>${fmt(v.sinal)}</b></div>` : ''}
+        ${temPix && v.sinal < v.total ? `<div class="resumo-linha"><span>Restante (pagar depois)</span><span>${fmt(v.total - v.sinal)}</span></div>` : ''}`;
+      if ($('#pg-sinal', m)) { $('#pg-sinal', m).textContent = fmt(v.minimo); $('#pg-total', m).textContent = fmt(v.total); }
     };
     // só oferece horários que respeitam o intervalo de limpeza com as locações vizinhas
     const atualizarHorarios = () => {
@@ -554,6 +623,7 @@ function abrirPreReserva(iso, dias = 1) {
       $('#saida-info', m).innerHTML = `Entrada <b>${brCurto(iso)} às ${f.horaEntrada.value}</b> · saída prevista <b>${String(s.getDate()).padStart(2, '0')}/${String(s.getMonth() + 1).padStart(2, '0')} às ${String(s.getHours()).padStart(2, '0')}:${String(s.getMinutes()).padStart(2, '0')}</b>`;
     };
     f.querySelectorAll('[name=periodo], [name=limpeza], [name=meia]').forEach((r) => (r.onchange = () => { resumo(); atualizarHorarios(); atualizarSaida(); }));
+    f.querySelectorAll('[name=pagar]').forEach((r) => (r.onchange = resumo));
     f.horaEntrada.onchange = atualizarSaida;
     resumo(); atualizarHorarios(); atualizarSaida();
     $('[data-fechar2]', m).onclick = fecharModal;
@@ -816,6 +886,7 @@ async function iniciar() {
     return;
   }
   await db.clienteOnAuth(async (u) => {
+    if (cadastrando) return;   // o formulário de cadastro conduz o resto (e pode desfazer a conta se o CPF já existir)
     if (u && usuario?.uid === u.uid) u.emailVerified = u.emailVerified || usuario.emailVerified;
     usuario = u;
     await carregarPerfil();

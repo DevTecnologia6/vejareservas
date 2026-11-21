@@ -138,6 +138,13 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - **Uma pré-reserva por vez:** o cliente não consegue fazer outra pré-reserva (nem pedido de mais tempo) enquanto tiver uma aguardando pagamento ou a sua aprovação. Isso impede alguém de segurar várias datas sem pagar.
 - Depois de publicar, abra o painel uma vez e clique em **Salvar configurações** em *Ajustes*: isso publica o intervalo para o site e grava o horário das reservas que já existem.
 
+## 5.0.7 Pagar o restante, pagar 100% e uma conta por CPF
+
+- **Pagar 100% de uma vez:** na pré-reserva o cliente escolhe *Sinal* ou *Valor total*; o QR Code do Pix sai com o valor escolhido.
+- **Pagar o restante pelo site:** em *Minhas reservas*, a reserva com saldo mostra **💳 Pagar o restante (R$ X)** com o QR Code do valor que falta e o botão "Já paguei". No painel aparece em **Pagamentos informados pelo cliente**: **Confirmar** lança o pagamento na reserva (e confirma a reserva se estava pendente); **Não caiu** avisa o cliente, que pode pagar de novo. O robô das 9h também avisa no WhatsApp quando houver pagamento a conferir.
+- **Uma conta por CPF:** ao criar a conta (ou trocar o CPF no cadastro), o sistema trava aquele CPF para a conta. Se já existir, aparece *"Este CPF já tem cadastro"* e a conta nova é desfeita. Ao excluir um cliente em *Clientes* você escolhe se o CPF fica livre ou bloqueado. Contas antigas com CPF repetido aparecem com o selo **⚠ CPF repetido** (e o *Diagnóstico das contas* no GitHub conta quantas são).
+  > Se alguém usar o CPF de outra pessoa, a pessoa certa vê a mensagem e fala com você: exclua a conta errada em *Clientes* (sem bloquear o CPF) e o CPF fica livre.
+
 ## 5.1 Horários e fotos
 
 - **Horário de entrada**: em *Ajustes*, defina os horários que o cliente pode escolher (ex.: `08:00, 09:00, 10:00, 12:00, 14:00`). Na pré-reserva ele escolhe um deles e o sistema mostra a **saída prevista** (12h ou 24h depois). No painel você pode digitar qualquer horário ao cadastrar ou editar.

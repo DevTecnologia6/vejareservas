@@ -4,6 +4,10 @@ admin.initializeApp({ credential: admin.credential.cert(JSON.parse(process.env.F
 const db = admin.firestore();
 const [cli, bloq, bloqE, pub] = await Promise.all([db.collection('clientes').get(), db.collection('bloqueados').get(), db.collection('bloqueiosEmail').get(), db.doc('publico/info').get()]);
 console.log(`publico/info existe: ${pub.exists} | clientes: ${cli.size} | bloqueados: ${bloq.size} | bloqueiosEmail: ${bloqE.size}`);
+// contas com o mesmo CPF (criadas antes da trava "uma conta por CPF") — o CPF nunca é impresso
+const porCpf = {}; cli.docs.forEach((d) => { const c = d.data().cpf; if (c) (porCpf[c] = porCpf[c] || []).push((d.data().nome || '?')[0] + '.'); });
+const repetidos = Object.values(porCpf).filter((l) => l.length > 1);
+console.log(`CPFs repetidos: ${repetidos.length}${repetidos.length ? ' → ' + repetidos.map((l) => l.join(' e ')).join(' | ') + ' (veja em Clientes no painel: selo "CPF repetido")' : ''}`);
 const idsBloq = new Set(bloq.docs.map((d) => d.id)), emailsBloq = new Set(bloqE.docs.map((d) => d.id));
 const { users } = await admin.auth().listUsers(1000);
 for (const u of users) {

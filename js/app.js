@@ -82,7 +82,7 @@ const selo = (s) => `<span class="selo st-${s}">${STATUS[s]?.label || s}</span>`
 
 // ---------------------------------------------------------------- estado
 const state = {
-  reservas: [], despesas: [], solicitacoes: [], cancelamentos: [], config: { ...CONFIG_PADRAO },
+  reservas: [], despesas: [], solicitacoes: [], cancelamentos: [], pagamentos: [], config: { ...CONFIG_PADRAO },
   mesInicio: new Date(), mesFin: new Date(), mesDesp: new Date(),
   filtroStatus: 'ativas', busca: ''
 };
@@ -94,8 +94,9 @@ function calc(r) {
 }
 
 async function carregar() {
-  const [reservas, despesas, cfg, sols, canc] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes').catch(() => []), db.list('cancelamentos').catch(() => [])]);
+  const [reservas, despesas, cfg, sols, canc, pags] = await Promise.all([db.list('reservas'), db.list('despesas'), db.get('config', 'geral'), db.list('solicitacoes').catch(() => []), db.list('cancelamentos').catch(() => []), db.list('pagamentosCliente').catch(() => [])]);
   state.cancelamentos = canc.filter((x) => x.status === 'pendente');
+  state.pagamentos = pags.filter((x) => x.status === 'informado');
   state.reservas = reservas;
   const expiradas = sols.filter((x) => (!x.status || x.status === 'aguardando') && !x.pagoInformadoEm && x.expiraEm && Date.now() > x.expiraEm);
   state.solicitacoes = sols.filter((x) => !['recusada', 'expirada', 'cancelada'].includes(x.status) && !expiradas.includes(x)).sort((a, b) => String(a.data).localeCompare(String(b.data)));
@@ -168,7 +169,7 @@ function montarMenus() {
 }
 
 function atualizarBadge() {
-  const n = state.solicitacoes.length + state.cancelamentos.length;
+  const n = state.solicitacoes.length + state.cancelamentos.length + state.pagamentos.length;
   $$('[data-pag="inicio"]').forEach((a) => {
     a.querySelector('.badge')?.remove();
     if (n) a.insertAdjacentHTML('beforeend', `<span class="badge">${n}</span>`);
@@ -194,7 +195,7 @@ function renderInicio(el) {
   const aReceber = state.reservas.filter((r) => ['pendente', 'confirmada'].includes(r.status) && r.data >= hoje()).reduce((s, r) => s + calc(r).falta, 0);
   const proximas = state.reservas.filter((r) => ['pendente', 'confirmada'].includes(r.status) && r.data >= hoje()).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 5);
 
-  el.innerHTML = '<div id="chk-aviso"></div>' + blocoCancelamentos() + blocoSolicitacoes() + `
+  el.innerHTML = '<div id="chk-aviso"></div>' + blocoPagamentos() + blocoCancelamentos() + blocoSolicitacoes() + `
     <div class="banner" style="background-image:url('assets/banner.jpg')">
       <img src="assets/logo.png" class="logo-img banner-logo" alt="">
       <div><div class="titulo">${esc(state.config.nome)}</div><div class="lema">Conforto &amp; Lazer</div></div>
@@ -242,7 +243,7 @@ function renderInicio(el) {
   $('#cal-hoje').onclick = () => { state.mesInicio = new Date(); desenhar(); };
   desenhar();
   ligarItens(el);
-  ligarSolicitacoes(el); ligarCancelamentos(el);
+  ligarSolicitacoes(el); ligarCancelamentos(el); ligarPagamentos(el);
   verificarSistema().then((itens) => {
     const pend = itens.filter((i) => !i.ok);
     if (!pend.length || !$('#chk-aviso')) return;
@@ -267,6 +268,52 @@ function blocoSolicitacoes() {
           <button class="btn btn-perigo btn-peq" data-recusar="${x.id}">Recusar</button>
           <button class="btn btn-ouro btn-peq" data-aprovar="${x.id}">Aprovar</button></div></div>
       </div>`).join('')}</div></div>`;
+}
+
+// Pagamentos do restante que o cliente pagou pelo Pix do site e avisou
+function blocoPagamentos() {
+  if (!state.pagamentos.length) return '';
+  return `<div class="card solic" style="border-color:#bfe3c9;background:linear-gradient(180deg,#f3fbf5,#fff)">
+    <div class="card-topo"><div><h3>Pagamentos informados pelo cliente</h3><small style="color:var(--cinza)">Confira se o Pix caiu na sua conta e confirme para lançar na reserva.</small></div><span class="badge" style="margin:0;font-size:13px;padding:3px 10px">${state.pagamentos.length}</span></div>
+    <div class="lista-res">${state.pagamentos.map((p) => {
+      const r = state.reservas.find((y) => y.id === p.reservaId);
+      const c = r ? calc(r) : null;
+      return `<div class="item-res">
+        <div class="ico" style="background:var(--verde-bg, #e6f6ea);color:var(--verde)">${ICO.din}</div>
+        <div class="meio"><b>${esc(p.cliente || r?.cliente || 'Cliente')}</b><small>💰 Pix de <b style="display:inline;font-size:13px">${fmt(p.valor)}</b> · código ${esc(p.codigo)} · reserva de ${r ? datasTxt(r) : br(p.data)}${c ? ` · faltava ${fmt(c.falta)}` : ''}</small>
+          <small style="display:block">Informado em ${fmtDataHora(new Date(p.criadoEm).getTime())}</small></div>
+        <div class="dir"><div class="acoes">
+          ${r ? `<button class="btn btn-claro btn-peq" data-verpag="${p.id}">Ver reserva</button>` : ''}
+          <button class="btn btn-perigo btn-peq" data-recusarpag="${p.id}">Não caiu</button>
+          ${r ? `<button class="btn btn-ouro btn-peq" data-confirmarpag="${p.id}">Confirmar</button>` : ''}</div></div>
+      </div>`;
+    }).join('')}</div></div>`;
+}
+
+function ligarPagamentos(el) {
+  $$('[data-verpag]', el).forEach((b) => (b.onclick = () => abrirDetalhe(b.dataset.verpag)));
+  $$('[data-recusarpag]', el).forEach((b) => (b.onclick = async () => {
+    if (!confirm('Marcar como não recebido? O cliente vê o aviso em Minhas reservas e pode pagar de novo.')) return;
+    await db.update('pagamentosCliente', b.dataset.recusarpag, { status: 'recusado' });
+    state.pagamentos = state.pagamentos.filter((x) => x.id !== b.dataset.recusarpag);
+    toast('Pagamento marcado como não recebido.'); rerender();
+  }));
+  $$('[data-confirmarpag]', el).forEach((b) => (b.onclick = async () => {
+    const p = state.pagamentos.find((x) => x.id === b.dataset.confirmarpag);
+    const r = state.reservas.find((y) => y.id === p.reservaId);
+    if (!confirm(`Confirmar o recebimento de ${fmt(p.valor)} de ${p.cliente || r.cliente}? O valor entra nos pagamentos da reserva.`)) return;
+    const upd = { pagamentos: [...(r.pagamentos || []), { valor: +p.valor, data: hoje(), forma: 'Pix' }] };
+    if (r.status === 'pendente') upd.status = 'confirmada';
+    if ((upd.status || r.status) === 'confirmada' && !r.prazoCancelamento) upd.prazoCancelamento = prazoCancelamento(r);
+    if ((upd.status || r.status) === 'confirmada' && !r.contrato) upd.contrato = contratoSnapshot();
+    try {
+      await db.update('reservas', r.id, upd); Object.assign(r, upd);
+      await db.update('pagamentosCliente', p.id, { status: 'confirmado' });
+      state.pagamentos = state.pagamentos.filter((x) => x.id !== p.id);
+      await sincronizarOcupacao(...datasDe(r));
+      toast('Pagamento confirmado!'); rerender();
+    } catch (e) { console.error(e); toast('Erro ao confirmar: ' + (e.message || e)); }
+  }));
 }
 
 function blocoCancelamentos() {
@@ -368,7 +415,7 @@ const ligarItens = (el) => $$('.item-res', el).forEach((i) => (i.onclick = () =>
 // ---------------------------------------------------------------- RESERVAS
 function renderReservas(el) {
   const filtros = { ativas: 'Próximas', todas: 'Todas', pendente: 'Pendentes', confirmada: 'Confirmadas', congelada: 'Congeladas', concluida: 'Concluídas', cancelada: 'Canceladas' };
-  el.innerHTML = blocoCancelamentos() + blocoSolicitacoes() + `
+  el.innerHTML = blocoPagamentos() + blocoCancelamentos() + blocoSolicitacoes() + `
     <div class="card">
       <div class="filtros"><input id="busca" placeholder="Buscar por cliente, telefone ou evento…" value="${esc(state.busca)}"></div>
       <div class="chips" style="margin-bottom:10px">${Object.entries(filtros).map(([k, v]) => `<button class="chip ${state.filtroStatus === k ? 'ativo' : ''}" data-f="${k}">${v}</button>`).join('')}</div>
@@ -386,7 +433,7 @@ function renderReservas(el) {
     $('#lista').innerHTML = lista.length ? lista.map(itemReserva).join('') : '<div class="vazio">Nenhuma reserva encontrada.</div>';
     ligarItens($('#lista'));
   };
-  ligarSolicitacoes(el); ligarCancelamentos(el);
+  ligarSolicitacoes(el); ligarCancelamentos(el); ligarPagamentos(el);
   $('#busca').oninput = (e) => { state.busca = e.target.value; desenhar(); };
   $$('.chip', el).forEach((c) => (c.onclick = () => { state.filtroStatus = c.dataset.f; $$('.chip', el).forEach((x) => x.classList.toggle('ativo', x === c)); desenhar(); }));
   desenhar();
@@ -755,6 +802,8 @@ async function renderClientes(el) {
   try { clientes = (await db.list('clientes')).sort((a, b) => String(a.nome).localeCompare(String(b.nome))); }
   catch (err) { console.error(err); el.innerHTML = '<div class="card"><div class="vazio">Não foi possível carregar os clientes. Confira se as regras do Firestore estão atualizadas.</div></div>'; return; }
   let busca = '';
+  // contas antigas (de antes da trava "uma conta por CPF") com o mesmo CPF
+  const qtdCpf = {}; clientes.forEach((c) => { if (c.cpf) qtdCpf[c.cpf] = (qtdCpf[c.cpf] || 0) + 1; });
   const desenhar = () => {
     const q = busca.toLowerCase();
     const lista = clientes.filter((c) => !q || [c.nome, c.email, c.telefone, c.cpf].some((v) => String(v || '').toLowerCase().includes(q)));
@@ -762,7 +811,7 @@ async function renderClientes(el) {
       const res = state.reservas.filter((r) => r.clienteUid === c.id);
       return `<div class="item-res" style="cursor:default;flex-wrap:wrap">
         <div class="ico">${ICO.pessoas}</div>
-        <div class="meio"><b>${esc(c.nome)}</b>
+        <div class="meio"><b>${esc(c.nome)}</b>${qtdCpf[c.cpf] > 1 ? ' <span class="selo st-cancelada">⚠ CPF repetido em outra conta</span>' : ''}
           <small>${esc(c.email || '')} · ${foneFmt(c.telefone)}${c.cpf ? ` · CPF ${cpfFmt(c.cpf)}` : ''}</small>
           <small style="display:block">${esc(c.endereco || '')}</small>
           <small style="display:block">${res.length} reserva(s) · cadastro em ${c.criadoEm ? br(String(c.criadoEm).slice(0, 10)) : '—'}</small></div>
@@ -791,6 +840,8 @@ function excluirCliente(c, depois) {
       • As reservas já confirmadas continuam no seu histórico.
     </div>
     <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-top:12px"><input type="checkbox" id="bloq-email"> Impedir que este e-mail crie uma conta nova</label>
+    ${c.cpf ? `<label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-top:8px"><input type="checkbox" id="bloq-cpf"> Impedir que este CPF crie uma conta nova</label>
+    <small style="display:block;color:var(--cinza);margin-top:4px">Sem marcar, o CPF fica livre para a pessoa se cadastrar de novo.</small>` : ''}
     <div class="modal-acoes"><button class="btn btn-claro" data-fechar2>Cancelar</button><button class="btn btn-perigo" id="conf-excluir">Excluir conta</button></div>`, (m) => {
     $('[data-fechar2]', m).onclick = fecharModal;
     $('#conf-excluir', m).onclick = async (e) => {
@@ -799,6 +850,11 @@ function excluirCliente(c, depois) {
         await db.set('bloqueados', c.id, { email: c.email || '', nome: c.nome || '', excluirLogin: true, em: new Date().toISOString() });
         if ($('#bloq-email', m).checked && c.email) await db.set('bloqueiosEmail', c.email.toLowerCase(), { em: new Date().toISOString() });
         await db.remove('clientes', c.id);
+        // trava "uma conta por CPF": apagar libera o CPF; manter bloqueia novos cadastros com ele
+        if (c.cpf) {
+          if ($('#bloq-cpf', m)?.checked) await db.set('cpfs', c.cpf, { uid: c.id });
+          else { const t = await db.get('cpfs', c.cpf).catch(() => null); if (t?.uid === c.id) await db.remove('cpfs', c.cpf); }
+        }
         const pend = state.solicitacoes.filter((x) => x.uid === c.id);
         for (const x of pend) await db.update('solicitacoes', x.id, { status: 'recusada' });
         state.solicitacoes = state.solicitacoes.filter((x) => x.uid !== c.id);

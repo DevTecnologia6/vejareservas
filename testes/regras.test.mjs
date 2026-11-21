@@ -87,6 +87,34 @@ await r('2ª pré-reserva com pagamento informado aguardando recusada', assertFa
 await r('cancela pré-reserva ainda não paga', assertSucceeds(eve.doc('solicitacoes/e1').update({ status: 'cancelada' })));
 await r('depois de cancelar pode fazer outra', assertSucceeds(enviar(eve, 'eve', 'e2', sol('eve', { data: '2027-06-01', dias: 1, valor: 1000, total: 1000, sinal: 500, codigo: 'VEJA3' }))));
 
+// ---- pagar 100% na pré-reserva
+const gil = ctx('gil');
+await r('pré-reserva pagando 100% aceita', assertSucceeds(enviar(gil, 'gil', 'g1', sol('gil', { data: '2027-07-01', dias: 1, valor: 1000, total: 1000, sinal: 1000 }))));
+const hel = ctx('hel');
+await r('sinal acima do total recusado', assertFails(enviar(hel, 'hel', 'h1', sol('hel', { data: '2027-07-10', dias: 1, valor: 1000, total: 1000, sinal: 1200 }))));
+
+// ---- uma conta por CPF (perfil + trava cpfs/{cpf} no mesmo lote, como db.salvarPerfil)
+const perfil = (cpf) => ({ nome: 'Pessoa Teste', telefone: '27999998888', cpf });
+const salvarPerfil = (db, uid, cpf, cpfAntigo) => { const b = db.batch(); b.set(db.doc(`clientes/${uid}`), perfil(cpf)); b.set(db.doc(`cpfs/${cpf}`), { uid }); if (cpfAntigo) b.delete(db.doc(`cpfs/${cpfAntigo}`)); return b.commit(); };
+await r('perfil com CPF novo aceito', assertSucceeds(salvarPerfil(ane, 'ane', '52998224725')));
+await r('regravar o próprio perfil com o mesmo CPF', assertSucceeds(salvarPerfil(ane, 'ane', '52998224725')));
+await r('outra conta com o mesmo CPF recusada', assertFails(salvarPerfil(bia, 'bia', '52998224725')));
+await r('perfil com CPF sem a trava recusado', assertFails(bia.doc('clientes/bia').set(perfil('11144477735'))));
+await r('não lê a trava de CPF de outra pessoa', assertFails(bia.doc('cpfs/52998224725').get()));
+await r('não apaga a trava de outra pessoa', assertFails(bia.doc('cpfs/52998224725').delete()));
+await r('cliente troca de CPF e solta o antigo', assertSucceeds(salvarPerfil(ane, 'ane', '11144477735', '52998224725')));
+await r('CPF liberado pode ser usado por outra conta', assertSucceeds(salvarPerfil(bia, 'bia', '52998224725')));
+
+// ---- pagamento do restante (reserva r1 do Dan: R$ 1.000, confirmada)
+const pag = (extra = {}) => ({ uid: 'dan', reservaId: 'r1', cliente: 'Dan Teste', data: '2027-02-10', valor: 500, codigo: 'VEJAP1', status: 'informado', criadoEm: new Date().toISOString(), ...extra });
+await r('pagamento maior que o total recusado', assertFails(dan.doc('pagamentosCliente/r1').set(pag({ valor: 1500 }))));
+await r('pagamento da reserva de outra pessoa recusado', assertFails(eve.doc('pagamentosCliente/r1').set(pag({ uid: 'eve' }))));
+await r('cliente informa pagamento do restante', assertSucceeds(dan.doc('pagamentosCliente/r1').set(pag())));
+await r('2º aviso enquanto o 1º aguarda recusado', assertFails(dan.doc('pagamentosCliente/r1').set(pag({ codigo: 'VEJAP2' }))));
+await r('cliente não confirma o próprio pagamento', assertFails(dan.doc('pagamentosCliente/r1').update({ status: 'confirmado' })));
+await env.withSecurityRulesDisabled((c) => c.firestore().doc('pagamentosCliente/r1').update({ status: 'recusado' }));
+await r('depois de "não caiu" pode informar de novo', assertSucceeds(dan.doc('pagamentosCliente/r1').set(pag({ codigo: 'VEJAP3' }))));
+
 // ---- dono
 const dono = env.authenticatedContext('dono', tok('devtecnologia6@gmail.com')).firestore();
 await r('dono sem senha bloqueado', assertFails(dono.doc('config/geral').get()));

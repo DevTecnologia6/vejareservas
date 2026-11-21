@@ -160,9 +160,38 @@ export async function clienteCadastrar(email, senha) {
   }
   await initFirebase();
   au.useDeviceLanguage(fauth);
+  // o e-mail de confirmação só sai depois que o perfil (com o CPF) for aceito: clienteReenviarConfirmacao()
   const cred = await au.createUserWithEmailAndPassword(fauth, email, senha);
-  await au.sendEmailVerification(cred.user, { url: location.href.split('#')[0] });
   return { uid: cred.user.uid, email: cred.user.email, emailVerified: false };
+}
+
+// Desfaz uma conta recém-criada (ex.: o CPF já tem cadastro em outra conta)
+export async function clienteDesfazerCadastro() {
+  if (modoDemo) {
+    const e = localStorage.getItem(LS + 'sessao_cliente'); const us = demoUsuarios(); delete us[e];
+    localStorage.setItem(LS + 'usuarios', JSON.stringify(us)); localStorage.removeItem(LS + 'sessao_cliente');
+    clienteListeners.forEach((cb) => cb(null)); return;
+  }
+  await fauth.currentUser?.delete().catch(() => au.signOut(fauth));
+}
+
+// Perfil do cliente + trava do CPF (cpfs/{cpf}) na mesma operação: as regras recusam se o CPF já for de outra conta.
+export class CpfEmUso extends Error { constructor() { super('cpf-em-uso'); this.code = 'cpf-em-uso'; } }
+export async function salvarPerfil(uid, dados, cpfAntigo = '') {
+  if (modoDemo) {
+    const travas = lsGet('cpfs');
+    if (dados.cpf && travas[dados.cpf] && travas[dados.cpf].uid !== uid) throw new CpfEmUso();
+    if (cpfAntigo && cpfAntigo !== dados.cpf && travas[cpfAntigo]?.uid === uid) delete travas[cpfAntigo];
+    if (dados.cpf) travas[dados.cpf] = { uid };
+    lsSet('cpfs', travas); await set('clientes', uid, dados); return;
+  }
+  await initFirebase();
+  const lote = fs.writeBatch(fdb);
+  lote.set(fs.doc(fdb, 'clientes', uid), dados);
+  if (dados.cpf) lote.set(fs.doc(fdb, 'cpfs', dados.cpf), { uid });
+  if (cpfAntigo && cpfAntigo !== dados.cpf) lote.delete(fs.doc(fdb, 'cpfs', cpfAntigo));
+  try { await lote.commit(); }
+  catch (e) { if (/permission/i.test(e.code || e.message)) throw new CpfEmUso(); throw e; }
 }
 
 export async function clienteEntrar(email, senha) {

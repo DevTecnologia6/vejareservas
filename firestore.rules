@@ -92,10 +92,29 @@ service cloud.firestore {
       allow read:  if isDono() || (logado() && resource.data.clienteUid == request.auth.uid);
     }
 
+    // ================= Uma conta por CPF =================
+    // cpfs/{cpf} = { uid }: gravado no mesmo lote do perfil (db.salvarPerfil). Ninguém lista; só o dono vê tudo.
+    // Ao excluir um cliente o dono apaga a trava (libera o CPF) ou a mantém (bloqueia o CPF).
+    function cpfPath(cpf) { return /databases/$(database)/documents/cpfs/$(cpf); }
+    match /cpfs/{cpf} {
+      allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
+      allow create: if logado() && cpf.matches('^[0-9]{11}$')
+        && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/clientes/$(request.auth.uid)).data.get('cpf', '') == cpf;
+      // regravar a própria trava (sem mudar nada)
+      allow update: if isDono() || (logado() && resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid);
+      // o cliente só solta o CPF antigo quando troca por outro no perfil
+      allow delete: if isDono() || (logado() && resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/clientes/$(request.auth.uid)).data.get('cpf', '') != cpf);
+    }
+
     // ================= Contas de clientes =================
     match /clientes/{uid} {
       allow read: if isDono() || (logado() && request.auth.uid == uid);
       allow create, update: if logado() && request.auth.uid == uid && !bloqueado()
+        // o CPF precisa estar travado para esta conta (no mesmo lote): não existem duas contas com o mesmo CPF
+        && (!('cpf' in request.resource.data) || getAfter(cpfPath(request.resource.data.cpf)).data.uid == uid)
         && request.resource.data.keys().hasOnly(['nome','telefone','cpf','end','endereco','email','criadoEm'])
         && request.resource.data.nome is string && request.resource.data.nome.size() >= 3 && request.resource.data.nome.size() <= 80
         && request.resource.data.telefone is string && request.resource.data.telefone.matches('^[0-9]{11}$')
@@ -138,6 +157,31 @@ service cloud.firestore {
             || ('expiraEm' in resource.data && resource.data.expiraEm < agora()))
       );
       allow delete: if isDono();
+    }
+
+    // ================= Pagamento do restante informado pelo cliente =================
+    // pagamentosCliente/{reservaId}: o cliente pagou o Pix do saldo e avisa; o dono confere e confirma no painel.
+    match /pagamentosCliente/{rid} {
+      allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
+      allow delete: if isDono();
+      allow create, update: if isDono() || (
+        clienteAtivo()
+        && (resource == null || resource.data.status != 'informado')   // um aviso por vez
+        && request.resource.data.keys().hasOnly(['uid', 'reservaId', 'cliente', 'data', 'valor', 'codigo', 'status', 'criadoEm'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.reservaId == rid
+        && request.resource.data.status == 'informado'
+        && request.resource.data.cliente is string && request.resource.data.cliente.size() <= 80
+        && request.resource.data.codigo is string && request.resource.data.codigo.size() <= 12
+        && request.resource.data.criadoEm is string && request.resource.data.criadoEm.size() <= 30
+        && pagamentoOk(request.resource.data, reservaDoc(rid))
+      );
+    }
+    function pagamentoOk(p, r) {
+      return r.get('clienteUid', '') == request.auth.uid
+        && r.status in ['pendente', 'confirmada']
+        && p.data == r.data
+        && p.valor is number && p.valor > 0 && p.valor <= r.valor + r.get('taxaLimpeza', 0);
     }
 
     // ================= Pedidos de cancelamento =================

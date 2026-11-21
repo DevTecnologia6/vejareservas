@@ -75,6 +75,17 @@ if (!DATA_TESTE) {
   }
 }
 
+// Aviso de pagamentos do restante informados pelos clientes (Pix a conferir)
+if (!DATA_TESTE) {
+  const pags = (await db.collection('pagamentosCliente').where('status', '==', 'informado').get()).docs.map((d) => d.data());
+  if (pags.length) {
+    const linhas = pags.slice(0, 10).map((p) => `• ${p.cliente} — ${fmt(p.valor)} (reserva de ${br(p.data)}) · ${p.codigo}`);
+    await enviarWhatsApp([`💰 *${pags.length} pagamento(s) informado(s) pelo site*`, '', ...linhas, '', 'Confira se o Pix caiu e confirme no painel do VejaReservas.'].join('\n'));
+    console.log(`💰 Aviso de ${pags.length} pagamento(s) enviado.`);
+    await new Promise((ok) => setTimeout(ok, 4000));
+  }
+}
+
 if (!reservas.length) process.exit(0);
 
 for (const r of reservas) {
