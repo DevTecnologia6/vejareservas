@@ -224,6 +224,19 @@ export async function add(col, obj) {
   return ref.id;
 }
 
+// Pré-reserva do site: grava a solicitação e a marca "uma pré-reserva por vez" (preReservaAtiva/{uid})
+// na mesma operação. As regras só aceitam se o cliente não tiver outra aguardando pagamento.
+export async function novaSolicitacao(uid, obj) {
+  if (modoDemo) { const id = await add('solicitacoes', obj); await set('preReservaAtiva', uid, { sol: id }); return id; }
+  await initFirebase();
+  const ref = fs.doc(fs.collection(fdb, 'solicitacoes'));
+  const lote = fs.writeBatch(fdb);
+  lote.set(ref, obj);
+  lote.set(fs.doc(fdb, 'preReservaAtiva', uid), { sol: ref.id });
+  await lote.commit();
+  return ref.id;
+}
+
 export async function set(col, id, obj) {
   if (modoDemo) { const all = lsGet(col); all[id] = obj; lsSet(col, all); return; }
   await initFirebase();

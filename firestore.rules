@@ -31,10 +31,31 @@ service cloud.firestore {
     function agora()        { return request.time.toMillis(); }
     function dataValida(s)  { return s is string && s.matches('^20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'); }
     function diaTs(s)       { return timestamp.date(int(s.split('-')[0]), int(s.split('-')[1]), int(s.split('-')[2])); }
-    // a data está dentro das diárias da pré-reserva?
-    function dentroDaSol(dia, s) {
-      return diaTs(dia) >= diaTs(s.data) && diaTs(dia) < diaTs(s.data) + duration.value(s.get('dias', 1) + (s.get('meia', false) == true ? 1 : 0), 'd');
+    // ---- formato da locação (mesmas contas de js/calendar.js) ----
+    function ehMeia(x)   { return x.get('meia', false) == true; }
+    function horasF(x)   { return (x.get('dias', 1) > 1 ? 24 * x.get('dias', 1) : (x.periodo == '12h' ? 12 : 24)) + (ehMeia(x) ? 12 : 0); }
+    function contaF(x)   { return x.get('dias', 1) + (ehMeia(x) ? 1 : 0); }   // quantas datas ocupa
+    function precoF(info, x) {
+      return (x.get('dias', 1) > 1 ? info.preco24 * x.get('dias', 1) : (x.periodo == '12h' ? info.preco12 : info.preco24)) + (ehMeia(x) ? info.preco12 : 0);
     }
+    // "AAAA-MM-DD" + "HH:MM" (horário de Brasília, UTC-3) → milissegundos
+    function msDe(data, hora) {
+      return (diaTs(data) + duration.value(int(hora.split(':')[0]) * 60 + int(hora.split(':')[1]) + 180, 'm')).toMillis();
+    }
+    // a data está dentro das datas que a pré-reserva pode segurar? (na extensão, só as datas novas)
+    function dentroDaSol(dia, s) {
+      return diaTs(dia) >= diaTs(s.get('marcaIni', s.data)) && diaTs(dia) < diaTs(s.data) + duration.value(contaF(s), 'd');
+    }
+
+    // ---- intervalo de limpeza entre locações (folga em ms) ----
+    function ocupPath(dia) { return /databases/$(database)/documents/ocupacao/$(dia); }
+    function ocupExpirada(o) { return o.get('status', '') == 'pendente' && o.get('expiraEm', 9999999999999) < agora(); }
+    // a locação do dia anterior termina (com folga) antes desta começar?
+    function antesOk(o, ini, folga)  { return ocupExpirada(o) || o.get('fim', 0) + folga <= ini; }
+    function livreAntes(dia, ini, folga) { return !exists(ocupPath(dia)) || antesOk(get(ocupPath(dia)).data, ini, folga); }
+    // a próxima locação começa (com folga) depois desta terminar?
+    function depoisOk(o, fim, folga) { return ocupExpirada(o) || o.get('ini', 9999999999999) >= fim + folga; }
+    function livreDepois(dia, fim, folga) { return !exists(ocupPath(dia)) || depoisOk(get(ocupPath(dia)).data, fim, folga); }
 
     // ================= Acesso em duas etapas do administrador =================
     // hash da senha do painel: ninguém lê; criado uma vez; trocado só com o painel destrancado
@@ -97,11 +118,12 @@ service cloud.firestore {
       let s = solDoc(novo.sol);
       return clienteAtivo()
         && dataValida(dia)
-        && novo.keys().hasOnly(['status', 'expiraEm', 'sol'])
+        && novo.keys().hasOnly(['status', 'expiraEm', 'sol', 'ini', 'fim'])
         && novo.status == 'pendente'
         && s.uid == request.auth.uid
         && s.status == 'aguardando'
         && dentroDaSol(dia, s)
+        && novo.get('ini', 0) == s.get('ini', 0) && novo.get('fim', 0) == s.get('fim', 0)
         && (('expiraEm' in novo && (novo.expiraEm == s.expiraEm || novo.expiraEm <= agora()))   // prazo normal ou liberação
             || (!('expiraEm' in novo) && s.get('pagoInformadoEm', null) != null));            // "Já paguei"
     }
@@ -135,20 +157,77 @@ service cloud.firestore {
       );
     }
 
+    // ================= Uma pré-reserva aguardando pagamento por vez =================
+    // preReservaAtiva/{uid} aponta para a última pré-reserva do cliente; é gravado junto com ela (mesmo lote).
+    function semPendencia(solId) {
+      let p = /databases/$(database)/documents/solicitacoes/$(solId);
+      return !exists(p) || get(p).data.status != 'aguardando'
+        || (get(p).data.get('pagoInformadoEm', null) == null && get(p).data.expiraEm < agora());
+    }
+    match /preReservaAtiva/{uid} {
+      allow read: if isDono() || (logado() && request.auth.uid == uid);
+      allow delete: if isDono();
+      allow update: if isDono() || (clienteAtivo() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['sol'])
+        && getAfter(/databases/$(database)/documents/solicitacoes/$(request.resource.data.sol)).data.uid == uid
+        && semPendencia(resource.data.sol));
+      allow create: if isDono() || (clienteAtivo() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['sol'])
+        && getAfter(/databases/$(database)/documents/solicitacoes/$(request.resource.data.sol)).data.uid == uid);
+    }
+
     // ================= Pré-reservas =================
-    // Valores conferidos com os preços publicados pelo dono (o cliente não consegue alterar preço nem sinal)
+    function sinalOk(d, info) {
+      return (d.sinal == 0 && info.get('pix', null) == null)
+        || (d.sinal >= d.total * info.get('sinalPct', 100) / 100 - 0.01 && d.sinal <= d.total);
+    }
+    // Pré-reserva nova: valores conferidos com os preços publicados pelo dono (o cliente não altera preço nem sinal)
     function precosOk(d) {
       let info = infoPublica();
-      let dias = d.get('dias', 1);
-      let pct = info.get('sinalPct', 100);
       return info.get('preReserva', true) == true
-        && d.valor == (dias > 1 ? info.preco24 * dias : (d.periodo == '12h' ? info.preco12 : info.preco24)) + (d.get('meia', false) == true ? info.preco12 : 0)
-        && (d.get('meia', false) == false || (d.meia == true && d.periodo == '24h'))
+        && d.valor == precoF(info, d)
+        && (!ehMeia(d) || d.periodo == '24h')
         && (d.taxaLimpeza == 0 || d.taxaLimpeza == info.taxaLimpeza)
         && d.total == d.valor + d.taxaLimpeza
-        && ((d.sinal == 0 && info.get('pix', null) == null)
-            || (d.sinal >= d.total * pct / 100 - 0.01 && d.sinal <= d.total))
+        && sinalOk(d, info)
         && d.expiraEm <= agora() + (info.get('prazoPagamentoMin', 30) + 2) * 60000;
+    }
+    // Horário exato + intervalo de limpeza com a locação anterior (dia "antes") e a seguinte (dia "depois")
+    function horarioOk(d) {
+      let folga = infoPublica().get('intervaloH', 0) * 3600000;
+      let dia0 = diaTs(d.data);
+      return d.ini == msDe(d.data, d.horaEntrada)
+        && d.fim == d.ini + horasF(d) * 3600000
+        && dataValida(d.antes) && diaTs(d.antes) == dia0 - duration.value(1, 'd')
+        && dataValida(d.depois) && diaTs(d.depois) == dia0 + duration.value(contaF(d), 'd')
+        && livreAntes(d.antes, d.ini, folga)
+        && livreDepois(d.depois, d.fim, folga);
+    }
+    // Pedido de extensão de uma reserva CONFIRMADA do próprio cliente.
+    // d.dias/periodo/meia = formato NOVO da reserva inteira; d.valor = diferença de preço de tabela.
+    function extensaoOk(d) {
+      let info = infoPublica();
+      let r = reservaDoc(d.extensao);
+      return info.get('preReserva', true) == true
+        && r.get('clienteUid', '') == request.auth.uid
+        && r.status == 'confirmada'
+        && d.data == r.data && d.horaEntrada == r.horaEntrada
+        && (!ehMeia(d) || d.periodo == '24h')
+        && extensaoValores(d, r, info, msDe(r.data, r.horaEntrada), horasF(r), horasF(d));
+    }
+    function extensaoValores(d, r, info, iniR, hR, hD) {
+      let dia0 = diaTs(r.data);
+      return hD > hR
+        && d.valor == precoF(info, d) - precoF(info, r)
+        && d.taxaLimpeza == 0 && d.total == d.valor
+        && sinalOk(d, info)
+        && d.expiraEm <= agora() + (info.get('prazoPagamentoMin', 30) + 2) * 60000
+        && d.ini == iniR + hR * 3600000                  // começa quando a reserva atual termina
+        && d.fim == iniR + hD * 3600000
+        && agora() <= d.ini                              // pedido feito antes do fim da estadia
+        && dataValida(d.marcaIni) && diaTs(d.marcaIni) == dia0 + duration.value(contaF(r), 'd')
+        && dataValida(d.depois) && diaTs(d.depois) == dia0 + duration.value(contaF(d), 'd')
+        && livreDepois(d.depois, d.fim, info.get('intervaloH', 0) * 3600000);
     }
     match /solicitacoes/{id} {
       allow read: if isDono() || (logado() && resource.data.uid == request.auth.uid);
@@ -161,8 +240,10 @@ service cloud.firestore {
         && (
           (agora() <= resource.data.expiraEm
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pagoInformadoEm']))
+          // cancelar só antes de informar o pagamento (depois disso as datas ficam presas até o dono decidir)
           || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-            && request.resource.data.status == 'cancelada')
+            && request.resource.data.status == 'cancelada'
+            && resource.data.get('pagoInformadoEm', null) == null)
         )
       );
       allow create: if isDono() || (
@@ -170,11 +251,17 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == 'aguardando'
-        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','expiraEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato','meia'])
+        && request.resource.data.keys().hasOnly(['uid','email','cliente','telefone','data','dias','periodo','horaEntrada','evento','obs','valor','taxaLimpeza','total','sinal','codigo','status','criadoEm','expiraEm','aceitouRegras','clienteCpf','clienteEndereco','aceiteContrato','meia','ini','fim','antes','depois','extensao','marcaIni'])
+        // uma pré-reserva aguardando pagamento por vez (a marca é gravada no mesmo lote)
+        && getAfter(/databases/$(database)/documents/preReservaAtiva/$(request.auth.uid)).data.sol == id
         && request.resource.data.cliente is string && request.resource.data.cliente.size() >= 3 && request.resource.data.cliente.size() <= 80
         && request.resource.data.telefone is string && request.resource.data.telefone.matches('^[0-9]{11}$')
         && dataValida(request.resource.data.data)
-        && diaTs(request.resource.data.data) >= request.time - duration.value(1, 'd')
+        && request.resource.data.ini is int && request.resource.data.fim is int
+        && ('extensao' in request.resource.data
+              ? (request.resource.data.extensao is string && extensaoOk(request.resource.data))
+              : (diaTs(request.resource.data.data) >= request.time - duration.value(1, 'd')
+                 && precosOk(request.resource.data) && horarioOk(request.resource.data)))
         && request.resource.data.periodo in ['12h', '24h']
         && (!('dias' in request.resource.data) || (request.resource.data.dias is int && request.resource.data.dias >= 1 && request.resource.data.dias <= 30))
         && request.resource.data.horaEntrada is string && request.resource.data.horaEntrada.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
@@ -185,7 +272,6 @@ service cloud.firestore {
         && request.resource.data.expiraEm is int
         && (!('clienteCpf' in request.resource.data) || (request.resource.data.clienteCpf is string && request.resource.data.clienteCpf.matches('^[0-9]{11}$')))
         && (!('clienteEndereco' in request.resource.data) || (request.resource.data.clienteEndereco is string && request.resource.data.clienteEndereco.size() <= 200))
-        && precosOk(request.resource.data)
       );
     }
   }

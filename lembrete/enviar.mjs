@@ -24,10 +24,13 @@ function saidaTxt(r) {
   if (!r.data || !r.horaEntrada) return '';
   const [h, m] = r.horaEntrada.split(':').map(Number);
   const d = new Date(`${r.data}T00:00:00Z`);
-  d.setUTCHours(h + ((+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24), m);
+  // mesma conta de horasDe() em js/calendar.js: diárias + 12h se tiver meia diária
+  d.setUTCHours(h + ((+r.dias || 1) > 1 ? 24 * r.dias : r.periodo === '12h' ? 12 : 24) + (r.meia ? 12 : 0), m);
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)} às ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
+// mesmo texto de periodoTxt() em js/calendar.js: "12h", "24h", "3 diárias", "3 diárias + 12h"
+const periodoTxt = (r) => ((+r.dias || 1) > 1 ? `${r.dias} diárias` : r.meia ? '1 diária' : r.periodo || '24h') + (r.meia ? ' + 12h' : '');
 const fone = (s) => { const d = String(s || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d || 'não informado'; };
 
 // "amanhã" no fuso de Brasília
@@ -65,7 +68,7 @@ console.log(`📅 Verificando ${br(amanha)} — ${reservas.length} locação(õe
 if (!DATA_TESTE) {
   const sols = (await db.collection('solicitacoes').get()).docs.map((d) => d.data()).filter((s) => (!s.status || s.status === 'aguardando') && (s.pagoInformadoEm || !s.expiraEm || s.expiraEm > Date.now())).sort((a, b) => String(a.data).localeCompare(String(b.data)));
   if (sols.length) {
-    const linhas = sols.slice(0, 10).map((s) => `• ${br(s.data)} — ${s.cliente} (${s.periodo}) · ${s.codigo}${s.sinal ? ` · sinal ${fmt(s.sinal)}` : ''}`);
+    const linhas = sols.slice(0, 10).map((s) => `• ${s.extensao ? '⏱ Mais tempo: ' : ''}${br(s.data)} — ${s.cliente} (${s.extensao ? s.obs || 'extensão' : periodoTxt(s)}) · ${s.codigo}${s.sinal ? ` · sinal ${fmt(s.sinal)}` : ''}`);
     await enviarWhatsApp([`🔔 *${sols.length} pré-reserva(s) do site aguardando aprovação*`, '', ...linhas, '', 'Confira o Pix e aprove no painel do VejaReservas.'].join('\n'));
     console.log(`🔔 Aviso de ${sols.length} pré-reserva(s) enviado.`);
     await new Promise((ok) => setTimeout(ok, 4000));
@@ -84,7 +87,7 @@ for (const r of reservas) {
     `👤 *Cliente:* ${r.cliente}`,
     `📞 *Telefone:* ${fone(r.telefone)}`,
     `🎉 *Evento:* ${r.evento || '—'}`,
-    `🕘 *Entrada:* ${br(r.data)} às ${r.horaEntrada || '—'} • ${(+r.dias || 1) > 1 ? `${r.dias} diárias` : r.periodo}`,
+    `🕘 *Entrada:* ${br(r.data)} às ${r.horaEntrada || '—'} • ${periodoTxt(r)}`,
     saidaTxt(r) ? `🚪 *Saída prevista:* ${saidaTxt(r)}` : null,
     `💰 *Total:* ${fmt(total)} | recebido ${fmt(recebido)}`,
     falta > 0 ? `⚠️ *Falta receber:* ${fmt(falta)}` : `✅ *Pagamento completo*`,

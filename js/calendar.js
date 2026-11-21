@@ -52,6 +52,37 @@ export function saidaDate(r) {
   return d;
 }
 
+// ---- horários exatos (intervalo de limpeza e extensão) ----
+// Sempre no horário de Brasília (UTC-3, sem horário de verão desde 2019) — as regras do Firestore fazem a mesma conta.
+const HORA_MS = 3600e3;
+/** "2027-01-16", "08:00" → milissegundos */
+export const msDe = (data, hora) => Date.parse(`${data}T${hora}:00-03:00`);
+/** { ini, fim } em milissegundos da locação inteira */
+export const iniFim = (r) => { const ini = msDe(r.data, r.horaEntrada); return { ini, fim: ini + horasDe(r) * HORA_MS }; };
+/** quantas datas a locação ocupa no calendário */
+export const contaDatas = (r) => Math.max(1, +r.dias || 1) + (r.meia ? 1 : 0);
+/** formato da locação para um total de horas: 12 → 12h · 24 → 24h · 36 → 1 diária + 12h · 48 → 2 diárias… */
+export function formaDeHoras(h) {
+  if (h <= 12) return { dias: 1, periodo: '12h', meia: false };
+  return { dias: Math.floor(h / 24), periodo: '24h', meia: h % 24 === 12 };
+}
+/** preço de tabela de um formato (mesma conta das regras do Firestore) */
+export const precoForma = (f, p) => ((+f.dias || 1) > 1 ? +p.preco24 * f.dias : f.periodo === '12h' ? +p.preco12 : +p.preco24) + (f.meia ? +p.preco12 : 0);
+/** a ocupação ainda vale? (pré-reserva não paga some quando o prazo vence) */
+export const ocupacaoValida = (o, agora = Date.now()) => !(o.status === 'pendente' && o.expiraEm && agora > o.expiraEm);
+/**
+ * Procura choque de horário considerando o intervalo de limpeza.
+ * @param {number} ini @param {number} fim  locação nova (ms)
+ * @param {Array} ocupacoes  docs de "ocupacao" com ini/fim
+ * @param {number} folgaH    horas livres exigidas entre uma locação e outra
+ * @param {Array} ignorar    datas (ids) que não contam (ex.: a própria reserva)
+ * @returns o doc em conflito, ou null
+ */
+export function choqueHorario(ini, fim, ocupacoes, folgaH = 0, ignorar = []) {
+  const folga = (+folgaH || 0) * HORA_MS;
+  return ocupacoes.find((o) => ocupacaoValida(o) && !ignorar.includes(o.id) && o.ini && o.fim && o.fim + folga > ini && fim + folga > o.ini) || null;
+}
+
 // "entrada 16/11 às 08:00 · saída 19/11 às 08:00"
 export function entradaSaidaTxt(r) {
   const s = saidaDate(r);

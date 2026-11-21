@@ -131,6 +131,13 @@ Quando chega uma pré-reserva, ela aparece no topo do **Início** (com um númer
 - **Contrato:** botão **⬇ Baixar PDF** gera o arquivo direto (e **🖨 Imprimir** como alternativa).
 - **Clientes (menu do painel):** lista de contas com busca, WhatsApp e **Excluir conta** — o acesso é bloqueado na hora, o cadastro é apagado e o login (e-mail/senha) é removido pelo robô do GitHub na próxima execução (todo dia às 9h ou em *Actions → Run workflow*). Opcionalmente, impede o e-mail de criar conta nova.
 
+## 5.0.6 Intervalo de limpeza, pedir mais tempo e uma pré-reserva por vez
+
+- **Intervalo entre locações** (*Ajustes*, padrão 4h): tempo livre entre a saída de um cliente e a entrada do próximo. O site só mostra os horários de entrada que respeitam esse intervalo (ex.: alguém sai às 09:00 → no mesmo dia só aparecem horários a partir das 13:00). Se o dia não tiver nenhum horário possível, o site avisa. No painel você ainda pode cadastrar à mão; ele só avisa que ficou colado.
+- **Pedir mais tempo:** em *Minhas reservas*, quem tem reserva **confirmada** vê o botão **⏱ Pedir mais tempo** até a hora da saída. Ele escolhe +12h, +1, +2 ou +3 diárias (as opções que batem com outra locação aparecem bloqueadas), paga o sinal pelo Pix e o horário fica segurado como *em negociação*. No painel o pedido aparece em *Pré-reservas* com o selo "Pedido de mais tempo": **Aprovar** amplia a reserva, soma o valor e lança o Pix; **Recusar** libera o horário.
+- **Uma pré-reserva por vez:** o cliente não consegue fazer outra pré-reserva (nem pedido de mais tempo) enquanto tiver uma aguardando pagamento ou a sua aprovação. Isso impede alguém de segurar várias datas sem pagar.
+- Depois de publicar, abra o painel uma vez e clique em **Salvar configurações** em *Ajustes*: isso publica o intervalo para o site e grava o horário das reservas que já existem.
+
 ## 5.1 Horários e fotos
 
 - **Horário de entrada**: em *Ajustes*, defina os horários que o cliente pode escolher (ex.: `08:00, 09:00, 10:00, 12:00, 14:00`). Na pré-reserva ele escolhe um deles e o sistema mostra a **saída prevista** (12h ou 24h depois). No painel você pode digitar qualquer horário ao cadastrar ou editar.

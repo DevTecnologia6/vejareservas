@@ -3,7 +3,7 @@
 // =====================================================================
 import * as db from './db.js';
 import './limites.js';
-import { renderCalendario, MESES, toISO, addDias, datasDe, periodoTxt, saidaDate, entradaSaidaTxt } from './calendar.js';
+import { renderCalendario, MESES, toISO, addDias, datasDe, periodoTxt, saidaDate, entradaSaidaTxt, iniFim } from './calendar.js';
 import { gerarPix, qrSVG } from './pix.js';
 import { comprimir, abrirVisualizador } from './fotos.js';
 import { htmlContrato, abrirContrato, CLAUSULAS_PADRAO, cpfFmt, cpfMascarado, cpfValido } from './contrato.js';
@@ -67,7 +67,7 @@ function prazoCancelamento(r) {
 const fmtDataHora = (ms) => { const d = new Date(ms); return `${br(toISO(d))} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const CONFIG_PADRAO = {
   nome: 'Espaço Veja', preco12: 770, preco24: 1000, taxaLimpeza: 75, horaEntrada: '09:00', horarios: '08:00, 09:00, 10:00, 12:00, 14:00', whatsapp: '',
-  preReserva: true, sinalPct: 50, prazoPagamentoMin: 30, regras: REGRAS_PADRAO,
+  preReserva: true, sinalPct: 50, prazoPagamentoMin: 30, intervaloH: 4, regras: REGRAS_PADRAO,
   pixTipo: 'celular', pixChave: '', pixNome: '', pixCidade: '',
   locadorNome: '', locadorCpf: '', locadorEndereco: '', imovelEndereco: '', foro: 'Serra/ES', clausulas: CLAUSULAS_PADRAO, assinatura: ''
 };
@@ -115,10 +115,24 @@ async function carregar() {
       db.update('reservas', r.id, { contrato: r.contrato }).catch(() => {});
     }
   }
+  // ocupações gravadas antes do intervalo de limpeza (sem ini/fim): grava o horário agora
+  const ocup = await db.list('ocupacao').catch(() => []);
+  const semHorario = ocup.filter((o) => o.id >= hoje() && !o.ini).map((o) => o.id);
+  if (semHorario.length) await sincronizarOcupacao(...semHorario).catch((e) => console.warn(e));
   $('#nome-espaco').textContent = state.config.nome;
 }
 
-// Mantém a coleção pública "ocupacao" (só datas, sem dados de clientes)
+// { ini, fim } em ms da locação, ou null se faltar data/horário
+const horarioDe = (x) => { if (!x?.data || !/^\d{2}:\d{2}$/.test(x.horaEntrada || '')) return null; const h = iniFim(x); return Number.isFinite(h.ini) ? h : null; };
+// Outra reserva sobreposta ou a menos do intervalo de limpeza desta (ignora a própria)
+function conflitoHorario(dados, ignorarId) {
+  const h = horarioDe(dados);
+  if (!h) return null;
+  const folga = (+state.config.intervaloH || 0) * 3600e3;
+  return state.reservas.find((x) => x.id !== ignorarId && OCUPA.includes(x.status) && (() => { const o = horarioDe(x); return o && o.fim + folga > h.ini && h.fim + folga > o.ini; })()) || null;
+}
+
+// Mantém a coleção pública "ocupacao" (só datas e horários, sem dados de clientes)
 async function sincronizarOcupacao(...datas) {
   for (const data of new Set(datas.filter(Boolean))) {
     const cobre = (x) => datasDe(x).includes(data);
@@ -128,7 +142,10 @@ async function sincronizarOcupacao(...datas) {
     // se só há pré-reservas do site ainda não pagas, a data fica segurada só até o prazo delas
     const sols = state.solicitacoes.filter(cobre);
     const soSolsNaoPagas = !state.reservas.some((r) => cobre(r) && OCUPA.includes(r.status)) && sols.length && sols.every((x) => !x.pagoInformadoEm && x.expiraEm);
-    if (ocupada) await db.set('ocupacao', data, soSolsNaoPagas ? { status: 'pendente', expiraEm: Math.max(...sols.map((x) => x.expiraEm)), sol: sols[0].id } : { status: pendente ? 'pendente' : 'reservado' });
+    // horário de entrada/saída (sem dados do cliente): o site usa para respeitar o intervalo de limpeza
+    const hs = [...state.reservas.filter((r) => cobre(r) && OCUPA.includes(r.status)), ...sols].map(horarioDe).filter(Boolean);
+    const hor = hs.length ? { ini: Math.min(...hs.map((h) => h.ini)), fim: Math.max(...hs.map((h) => h.fim)) } : {};
+    if (ocupada) await db.set('ocupacao', data, soSolsNaoPagas ? { status: 'pendente', expiraEm: Math.max(...sols.map((x) => x.expiraEm)), sol: sols[0].id, ...hor } : { status: pendente ? 'pendente' : 'reservado', ...hor });
     else await db.remove('ocupacao', data).catch(() => {});
   }
 }
@@ -242,7 +259,7 @@ function blocoSolicitacoes() {
     <div class="lista-res">${state.solicitacoes.map((x) => `
       <div class="item-res">
         <div class="ico">${ICO.cal}</div>
-        <div class="meio"><b>${esc(x.cliente)}</b><small>${datasTxt(x)} — ${esc(x.evento || 'Evento')} · ${periodoTxt(x)}${x.horaEntrada ? ' · ' + entradaSaidaTxt(x) : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
+        <div class="meio"><b>${esc(x.cliente)}</b>${x.extensao ? ' <span class="selo st-pendente">⏱ Pedido de mais tempo</span>' : ''}<small>${x.extensao ? `${esc(x.obs)} · reserva passa a ser ` : ''}${datasTxt(x)} —${esc(x.evento || 'Evento')} · ${periodoTxt(x)}${x.horaEntrada ? ' · ' + entradaSaidaTxt(x) : ''} · <b style="display:inline;font-size:13px;color:var(--ouro-esc)">${esc(x.codigo)}</b></small>
           <small style="display:block;margin:2px 0">${x.pagoInformadoEm ? '<span class="selo st-confirmada">💰 Cliente informou o pagamento — confira o Pix</span>' : x.expiraEm ? `<span class="selo st-pendente">⏳ Aguardando pagamento · expira às ${new Date(x.expiraEm).toTimeString().slice(0, 5)}</span>` : ''}</small>
           <small style="display:block">${foneFmt(x.telefone)}${x.email ? ` · ${esc(x.email)}` : ''}${x.sinal ? ` · sinal via Pix: ${fmt(x.sinal)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small></div>
         <div class="dir"><b style="margin:0 0 8px">${fmt(x.total)}</b><div class="acoes">
@@ -293,6 +310,7 @@ function ligarCancelamentos(el) {
 function ligarSolicitacoes(el) {
   $$('[data-aprovar]', el).forEach((b) => (b.onclick = () => {
     const x = state.solicitacoes.find((s) => s.id === b.dataset.aprovar);
+    if (x.extensao) return aprovarExtensao(x);
     abrirFormReserva({
       cliente: x.cliente, telefone: x.telefone, data: x.data, dias: x.dias || 1, meia: !!x.meia, periodo: x.periodo, evento: x.evento, horaEntrada: x.horaEntrada || state.config.horaEntrada,
       valor: x.valor, taxaLimpeza: x.taxaLimpeza, status: x.sinal ? 'confirmada' : 'pendente',
@@ -309,6 +327,32 @@ function ligarSolicitacoes(el) {
     await sincronizarOcupacao(...datasDe(x));
     toast('Pré-reserva recusada.'); rerender();
   }));
+}
+
+// Pedido de mais tempo feito pelo cliente: amplia a reserva original e lança o Pix pago
+async function aprovarExtensao(x) {
+  const r = state.reservas.find((y) => y.id === x.extensao);
+  if (!r) return toast('A reserva original não foi encontrada. Recuse o pedido e fale com o cliente.');
+  const forma = { dias: +x.dias || 1, periodo: x.periodo, meia: !!x.meia };
+  const nova = { ...r, ...forma };
+  const conflito = conflitoHorario(nova, r.id);
+  const saida = saidaDate(nova);
+  const msg = `Aprovar o pedido de ${x.cliente}: ${x.obs}?\n\nA reserva passa de ${periodoTxt(r)} para ${periodoTxt(nova)}, com saída em ${saida ? fmtDataHora(saida.getTime()) : '—'}, e o valor da locação vai de ${fmt(r.valor)} para ${fmt(+r.valor + +x.valor)}.`
+    + (x.sinal ? ` O Pix de ${fmt(x.sinal)} será lançado como pagamento (confira se caiu).` : '')
+    + (conflito ? `\n\n⚠ Atenção: fica a menos de ${state.config.intervaloH || 0}h (ou sobreposto) da reserva de ${conflito.cliente} (${datasTxt(conflito)}).` : '');
+  if (!confirm(msg)) return;
+  const dados = {
+    ...forma, valor: (+r.valor || 0) + (+x.valor || 0),
+    pagamentos: [...(r.pagamentos || []), ...(x.sinal ? [{ valor: +x.sinal, data: hoje(), forma: 'Pix' }] : [])],
+    obs: [r.obs, `${x.obs} (${x.codigo}, site)`].filter(Boolean).join(' — ')
+  };
+  try {
+    await db.update('reservas', r.id, dados); Object.assign(r, dados);
+    await db.remove('solicitacoes', x.id);
+    state.solicitacoes = state.solicitacoes.filter((s) => s.id !== x.id);
+    await sincronizarOcupacao(...datasDe(r));
+    toast('Extensão aprovada!'); rerender();
+  } catch (e) { console.error(e); toast('Erro ao aprovar: ' + (e.message || e)); }
 }
 
 function itemReserva(r) {
@@ -455,6 +499,8 @@ function abrirFormReserva(r = {}) {
         const minhas = datasDe(dados);
         const choque = state.reservas.find((x) => x.id !== r.id && OCUPA.includes(x.status) && datasDe(x).some((d) => minhas.includes(d)));
         if (choque && !confirm(`Atenção: essas datas coincidem com a reserva de ${choque.cliente} (${datasTxt(choque)}). Salvar mesmo assim?`)) return;
+        const colada = !choque && conflitoHorario(dados, r.id);
+        if (colada && !confirm(`Atenção: este horário fica a menos de ${state.config.intervaloH || 0}h da reserva de ${colada.cliente} (${datasTxt(colada)} · ${entradaSaidaTxt(colada)}). Não sobra o intervalo para a limpeza. Salvar mesmo assim?`)) return;
       }
       const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Salvando…';
       try {
@@ -838,7 +884,7 @@ async function verificarSistema() {
   const c = state.config;
   const [pub, fotos] = await Promise.all([db.get('publico', 'info').catch(() => null), db.list('fotos').catch(() => [])]);
   const horariosOk = String(c.horarios || '').split(/[,;\s]+/).filter(Boolean).every((h) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(h));
-  const publicado = pub && +pub.preco24 === +c.preco24 && +pub.preco12 === +c.preco12 && +pub.taxaLimpeza === +c.taxaLimpeza && (pub.pix?.chave || '') === (c.pixChave || '');
+  const publicado = pub && +pub.preco24 === +c.preco24 && +pub.preco12 === +c.preco12 && +pub.taxaLimpeza === +c.taxaLimpeza && (pub.pix?.chave || '') === (c.pixChave || '') && +(pub.intervaloH || 0) === +(c.intervaloH || 0);
   const https = db.modoDemo || location.protocol === 'https:';
   return [
     { ok: soDigitos(c.whatsapp).length === 11, t: 'WhatsApp para reservas', d: 'Número que recebe os clientes do site', ir: 'config' },
@@ -888,6 +934,8 @@ function renderConfig(el) {
             <label class="campo">Horário padrão de entrada<input type="time" name="horaEntrada" value="${esc(c.horaEntrada)}"></label>
             <label class="campo inteiro">Horários de entrada que o cliente pode escolher<input name="horarios" value="${esc(c.horarios)}" placeholder="08:00">
               <small style="font-weight:400">Coloque <b>um só horário</b> (ex.: 08:00) para o horário ser fixo — o cliente não escolhe. Ou vários separados por vírgula. A saída é calculada sozinha: 12h → 12 horas depois; 24h → mesmo horário no dia seguinte; várias diárias → mesmo horário no dia seguinte à última diária.</small></label>
+            <label class="campo inteiro">Intervalo entre locações (horas)<input type="number" name="intervaloH" min="0" max="24" step="1" value="${+c.intervaloH || 0}">
+              <small style="font-weight:400">Tempo livre para a limpeza entre a saída de um cliente e a entrada do próximo. O site só oferece horários de entrada que respeitam esse intervalo (0 = sem intervalo).</small></label>
             <label class="campo inteiro">WhatsApp para reservas (com DDD)<input name="whatsapp" inputmode="tel" placeholder="(27) 99999-9999" value="${esc(c.whatsapp ? foneFmt(c.whatsapp) : '')}">
               <small style="font-weight:400">Os clientes do calendário público falam com você por este número.</small></label>
           </div>
@@ -1007,6 +1055,7 @@ function renderConfig(el) {
       nome: d.nome.trim() || 'Espaço Veja', preco12: +d.preco12, preco24: +d.preco24, taxaLimpeza: +d.taxaLimpeza,
       horaEntrada: d.horaEntrada, horarios: d.horarios.trim(), whatsapp: soDigitos(d.whatsapp),
       preReserva: !!d.preReserva, sinalPct: +d.sinalPct, prazoPagamentoMin: Math.min(1440, Math.max(5, +d.prazoPagamentoMin || 30)), regras: d.regras.trim(),
+      intervaloH: Math.min(24, Math.max(0, Math.round(+d.intervaloH || 0))),
       pixTipo: d.pixTipo, pixChave: d.pixChave.trim(), pixNome: d.pixNome.trim(), pixCidade: d.pixCidade.trim(),
       locadorNome: d.locadorNome.trim(), locadorCpf: soDigitos(d.locadorCpf), locadorEndereco: d.locadorEndereco.trim(),
       imovelEndereco: d.imovelEndereco.trim(), foro: d.foro.trim(), clausulas: d.clausulas.trim() || CLAUSULAS_PADRAO, assinatura
@@ -1022,7 +1071,7 @@ function renderConfig(el) {
     await db.set('publico', 'info', {
       nome: cfg.nome, whatsapp: cfg.whatsapp ? foneBR(cfg.whatsapp) : '',
       preco12: cfg.preco12, preco24: cfg.preco24, taxaLimpeza: cfg.taxaLimpeza, horaEntrada: cfg.horaEntrada, horarios: cfg.horarios,
-      preReserva: cfg.preReserva, sinalPct: cfg.sinalPct, prazoPagamentoMin: cfg.prazoPagamentoMin, regras: cfg.regras,
+      preReserva: cfg.preReserva, sinalPct: cfg.sinalPct, prazoPagamentoMin: cfg.prazoPagamentoMin, regras: cfg.regras, intervaloH: cfg.intervaloH,
       pix: cfg.pixChave ? { chave: cfg.pixChave, tipo: cfg.pixTipo, nome: cfg.pixNome, cidade: cfg.pixCidade } : null,
       // prévia do contrato para o cliente (sem o seu CPF completo e sem o seu endereço)
       contrato: { nomeEspaco: cfg.nome, locadorNome: cfg.locadorNome, locadorCpfMasc: cfg.locadorCpf ? cpfMascarado(cfg.locadorCpf) : '', imovelEndereco: cfg.imovelEndereco || cfg.locadorEndereco || '', foro: cfg.foro, clausulas: cfg.clausulas }
